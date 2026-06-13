@@ -12,9 +12,7 @@ export type IconName =
   | 'camera' | 'barcode' | 'mail' | 'eye' | 'eye-off' | 'lock'
   | 'shield' | 'file-text' | 'refresh' | 'info' | 'star' | 'archive';
 
-import { CSSProperties, ReactNode } from 'react';
-
-const PATHS: Record<IconName, ReactNode> = {
+const PATHS: Record<IconName, JSX.Element> = {
   'home': (<><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V9.5z"/></>),
   'package': (<><path d="M16.5 9.4L7.5 4.21M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></>),
   'arrow-down': (<><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></>),
