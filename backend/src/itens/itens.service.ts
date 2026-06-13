@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, HttpException,
+  Injectable, Logger, NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export function calcularStatusValidade(dataValidade: Date | null): string {
@@ -22,6 +25,8 @@ export function calcularStatusValidade(dataValidade: Date | null): string {
 
 @Injectable()
 export class ItensService {
+  private logger = new Logger('ItensService');
+
   constructor(private prisma: PrismaService) {}
 
   async findAll(filtros: { busca?: string; categoriaId?: string; setorId?: string }) {
@@ -50,43 +55,124 @@ export class ItensService {
   }
 
   async findByEan(ean: string) {
+    const eanLimpo = (ean || '').replace(/\D/g, '');
     const item = await this.prisma.item.findFirst({
-      where: { codigoEan: ean, ativo: true },
+      where: { codigoEan: eanLimpo, ativo: true },
       include: { categoria: true, setor: true },
     });
-    if (!item) return { encontrado: false, ean };
+    if (!item) return { encontrado: false, ean: eanLimpo };
     return { encontrado: true, item: { ...item, statusValidade: calcularStatusValidade(item.dataValidade) } };
   }
 
   async create(data: any) {
-    if (data.codigoEan) {
-      const existe = await this.prisma.item.findFirst({ where: { codigoEan: data.codigoEan, ativo: true } });
-      if (existe) throw new ConflictException(`EAN ja cadastrado no item: ${existe.nome}`);
+    try {
+      // ─── Validacoes ────────────────────────────────────────────
+      const nome = (data.nome || '').trim();
+      if (!nome) throw new BadRequestException('Nome do item e obrigatorio');
+      if (!data.categoriaId) throw new BadRequestException('Categoria e obrigatoria');
+
+      // Confere se categoria existe
+      const cat = await this.prisma.categoria.findUnique({ where: { id: data.categoriaId } });
+      if (!cat) throw new BadRequestException('Categoria selecionada nao existe mais. Atualize a pagina.');
+
+      // Confere se setor existe (se enviado)
+      let setorIdValido: string | null = null;
+      if (data.setorId && typeof data.setorId === 'string' && data.setorId.trim()) {
+        const setor = await this.prisma.setor.findUnique({ where: { id: data.setorId.trim() } });
+        if (!setor) {
+          this.logger.warn(`Setor ${data.setorId} nao encontrado, salvando sem setor`);
+        } else {
+          setorIdValido = setor.id;
+        }
+      }
+
+      // Limpa e valida EAN
+      const eanLimpo = (data.codigoEan || '').replace(/\D/g, '');
+      if (eanLimpo) {
+        const existe = await this.prisma.item.findFirst({ where: { codigoEan: eanLimpo, ativo: true } });
+        if (existe) throw new ConflictException(`Codigo de barras ja cadastrado para: ${existe.nome}`);
+      }
+
+      // Gera codigo interno sequencial
+      const count = await this.prisma.item.count();
+      const codigoInterno = (data.codigoInterno || '').trim() || `WF-${String(count + 1).padStart(5, '0')}`;
+
+      // Normalizacao de tipos para evitar surpresas no Prisma
+      const estoqueMinimo = Number(data.estoqueMinimo);
+      const estoqueValido = Number.isFinite(estoqueMinimo) && estoqueMinimo >= 0 ? estoqueMinimo : 0;
+
+      // ─── Persistencia ──────────────────────────────────────────
+      const criado = await this.prisma.item.create({
+        data: {
+          codigoInterno,
+          codigoEan: eanLimpo || null,
+          nome,
+          descricao: data.descricao?.trim() || null,
+          unidadeMedida: (data.unidadeMedida || '').trim() || 'un',
+          estoqueMinimo: estoqueValido,
+          dataValidade: data.dataValidade ? new Date(data.dataValidade) : null,
+          localizacao: data.localizacao?.trim() || null,
+          categoriaId: data.categoriaId,
+          setorId: setorIdValido,
+        },
+        include: { categoria: true, setor: true },
+      });
+
+      this.logger.log(`Item criado: ${criado.codigoInterno} - ${criado.nome}`);
+      return criado;
+    } catch (err: any) {
+      // Re-lanca excecoes HTTP (BadRequest, Conflict, etc.) sem reempacotar
+      if (err instanceof HttpException) throw err;
+
+      // Loga erro tecnico completo (visivel nos logs do Render)
+      this.logger.error(`Falha ao criar item: ${err.message}`, err.stack);
+
+      // Erros conhecidos do Prisma viram mensagens amigaveis
+      if (err.code === 'P2002') {
+        const campo = Array.isArray(err.meta?.target) ? err.meta.target.join(', ') : 'campo';
+        throw new ConflictException(`Ja existe um item com este ${campo}`);
+      }
+      if (err.code === 'P2003') {
+        throw new BadRequestException('Categoria ou setor invalido. Atualize a pagina e tente novamente.');
+      }
+      if (err.code === 'P2025') {
+        throw new BadRequestException('Registro relacionado nao encontrado');
+      }
+
+      // Erro generico — exibe pelo menos a mensagem original em vez de "Internal server error"
+      throw new BadRequestException(`Nao foi possivel cadastrar: ${err.message || 'erro desconhecido'}`);
     }
-    const count = await this.prisma.item.count();
-    const codigoInterno = data.codigoInterno || `WF-${String(count + 1).padStart(5, '0')}`;
-    return this.prisma.item.create({
-      data: {
-        codigoInterno,
-        codigoEan: data.codigoEan || null,
-        nome: data.nome,
-        descricao: data.descricao,
-        unidadeMedida: data.unidadeMedida || 'un',
-        estoqueMinimo: data.estoqueMinimo || 0,
-        dataValidade: data.dataValidade ? new Date(data.dataValidade) : null,
-        localizacao: data.localizacao,
-        categoriaId: data.categoriaId,
-        setorId: data.setorId || null,
-      },
-      include: { categoria: true, setor: true },
-    });
   }
 
   async update(id: string, data: any) {
-    const item = await this.prisma.item.findUnique({ where: { id } });
-    if (!item) throw new NotFoundException('Item nao encontrado');
-    if (data.dataValidade) data.dataValidade = new Date(data.dataValidade);
-    return this.prisma.item.update({ where: { id }, data, include: { categoria: true, setor: true } });
+    try {
+      const item = await this.prisma.item.findUnique({ where: { id } });
+      if (!item) throw new NotFoundException('Item nao encontrado');
+
+      const updateData: any = {};
+      if (data.nome !== undefined) updateData.nome = data.nome.trim();
+      if (data.descricao !== undefined) updateData.descricao = data.descricao?.trim() || null;
+      if (data.unidadeMedida !== undefined) updateData.unidadeMedida = data.unidadeMedida.trim() || 'un';
+      if (data.estoqueMinimo !== undefined) updateData.estoqueMinimo = Number(data.estoqueMinimo) || 0;
+      if (data.localizacao !== undefined) updateData.localizacao = data.localizacao?.trim() || null;
+      if (data.categoriaId !== undefined) updateData.categoriaId = data.categoriaId;
+      if (data.setorId !== undefined) updateData.setorId = data.setorId || null;
+      if (data.dataValidade !== undefined) {
+        updateData.dataValidade = data.dataValidade ? new Date(data.dataValidade) : null;
+      }
+      if (data.codigoEan !== undefined) {
+        updateData.codigoEan = (data.codigoEan || '').replace(/\D/g, '') || null;
+      }
+
+      return await this.prisma.item.update({
+        where: { id }, data: updateData,
+        include: { categoria: true, setor: true },
+      });
+    } catch (err: any) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error(`Falha ao atualizar item ${id}: ${err.message}`);
+      throw new BadRequestException(`Nao foi possivel atualizar: ${err.message}`);
+    }
   }
 
   async desativar(id: string) {
@@ -102,7 +188,6 @@ export class ItensService {
     });
     if (!item) throw new NotFoundException('Item nao encontrado');
 
-    // Se tem historico de movimentacao, apenas desativa (preserva integridade)
     if (item._count.movimentacaoItens > 0) {
       await this.prisma.item.update({ where: { id }, data: { ativo: false } });
       return {
@@ -111,7 +196,6 @@ export class ItensService {
       };
     }
 
-    // Sem historico: exclusao definitiva
     await this.prisma.item.delete({ where: { id } });
     return { mensagem: 'Item excluido permanentemente', excluido: true };
   }

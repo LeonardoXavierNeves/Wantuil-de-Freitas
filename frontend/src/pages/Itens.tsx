@@ -10,7 +10,6 @@ export default function Itens() {
   const { podeFazer } = useAuth();
   const [itens, setItens] = useState<any[]>([]);
   const [categorias, setCategorias] = useState<any[]>([]);
-  const [setores, setSetores] = useState<any[]>([]);
   const [busca, setBusca] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -23,7 +22,6 @@ export default function Itens() {
   useEffect(() => {
     carregar();
     api.get('/categorias').then((r) => setCategorias(r.data));
-    api.get('/setores').then((r) => setSetores(r.data));
   }, []);
   useEffect(() => { const t = setTimeout(carregar, 250); return () => clearTimeout(t); }, [busca, filtroCategoria]);
 
@@ -158,7 +156,7 @@ export default function Itens() {
       {showForm && (
         <FormItem item={editando}
           eanInicial={eanPre} nomeInicial={nomePre} categoriaSugerida={categoriaPre}
-          categorias={categorias} setores={setores}
+          categorias={categorias}
           onClose={() => setShowForm(false)}
           onSave={() => { setShowForm(false); carregar(); }} />
       )}
@@ -166,7 +164,7 @@ export default function Itens() {
   );
 }
 
-function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias, setores, onClose, onSave }: any) {
+function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias, onClose, onSave }: any) {
   // Tenta pré-selecionar a categoria sugerida pelo nome
   const categoriaIdInicial = item?.categoriaId
     || categorias.find((c: any) => c.nome.toLowerCase() === (categoriaSugerida || '').toLowerCase())?.id
@@ -176,7 +174,7 @@ function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias
     codigoEan: item?.codigoEan || eanInicial || '',
     nome: item?.nome || nomeInicial || '',
     descricao: item?.descricao || '',
-    unidadeMedida: item?.unidadeMedida || 'un',
+    unidadeMedida: item?.unidadeMedida || '',
     estoqueMinimo: item?.estoqueMinimo || 0,
     categoriaId: categoriaIdInicial,
     setorId: item?.setorId || '',
@@ -188,16 +186,28 @@ function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias
   async function salvar(e: React.FormEvent) {
     e.preventDefault(); setErro(''); setSalvando(true);
     try {
-      if (item) await api.patch(`/itens/${item.id}`, form);
-      else await api.post('/itens', form);
+      // Monta payload limpo: setor preservado se ja existia (edicao), default 'un' para unidade
+      const payload = {
+        codigoEan: form.codigoEan?.trim() || undefined,
+        nome: form.nome.trim(),
+        descricao: form.descricao?.trim() || undefined,
+        unidadeMedida: form.unidadeMedida?.trim() || 'un',
+        estoqueMinimo: Number(form.estoqueMinimo) || 0,
+        categoriaId: form.categoriaId,
+        setorId: form.setorId || undefined,
+        localizacao: form.localizacao?.trim() || undefined,
+      };
+
+      if (item) await api.patch(`/itens/${item.id}`, payload);
+      else await api.post('/itens', payload);
 
       // Se o item tem EAN, salvar no catalogo local para acelerar leituras futuras.
       // Falha silenciosa: o item ja foi cadastrado com sucesso, o cache e secundario.
-      if (form.codigoEan && form.nome) {
+      if (payload.codigoEan && payload.nome) {
         const categoriaNome = categorias.find((c: any) => c.id === form.categoriaId)?.nome;
         api.post('/produtos-externos/salvar-manual', {
-          ean: form.codigoEan,
-          nome: form.nome,
+          ean: payload.codigoEan,
+          nome: payload.nome,
           categoria: categoriaNome,
           categoriaSugerida: categoriaNome,
         }).catch(() => {/* silencioso */});
@@ -228,29 +238,19 @@ function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias
           onChange={(e) => setForm({ ...form, nome: e.target.value })}
           style={{ marginBottom: 12 }} />
 
-        <div className="grid-2" style={{ marginBottom: 12 }}>
-          <div>
-            <label className="label">Categoria *</label>
-            <select className="select" value={form.categoriaId} required
-              onChange={(e) => setForm({ ...form, categoriaId: e.target.value })}>
-              {categorias.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Setor</label>
-            <select className="select" value={form.setorId}
-              onChange={(e) => setForm({ ...form, setorId: e.target.value })}>
-              <option value="">Sem setor definido</option>
-              {setores.map((s: any) => <option key={s.id} value={s.id}>{s.nome}</option>)}
-            </select>
-          </div>
-        </div>
+        <label className="label">Categoria *</label>
+        <select className="select" value={form.categoriaId} required
+          onChange={(e) => setForm({ ...form, categoriaId: e.target.value })}
+          style={{ marginBottom: 12 }}>
+          {categorias.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
 
         <div className="grid-2" style={{ marginBottom: 12 }}>
           <div>
             <label className="label">Unidade</label>
             <input className="input" value={form.unidadeMedida}
-              onChange={(e) => setForm({ ...form, unidadeMedida: e.target.value })} />
+              onChange={(e) => setForm({ ...form, unidadeMedida: e.target.value })}
+              placeholder="un (padrão)" />
           </div>
           <div>
             <label className="label">Estoque mínimo</label>
