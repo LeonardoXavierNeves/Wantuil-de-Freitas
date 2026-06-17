@@ -24,9 +24,10 @@ export interface DTOEntrada {
 }
 
 export interface DTOSaida {
-  destinoSaida: 'BENEFICIARIO' | 'SETOR';
+  destinoSaida: 'BENEFICIARIO' | 'SETOR' | 'EVENTO';
   beneficiarioId?: string | null;
   setorId?: string | null;
+  eventoId?: string | null;
   finalidade?: string;
   observacao?: string | null;
   dataMovimentacao?: string | Date;
@@ -151,6 +152,9 @@ export class MovimentacoesService {
     if (dto.destinoSaida === 'SETOR' && !dto.setorId) {
       throw new BadRequestException('Selecione o setor');
     }
+    if (dto.destinoSaida === 'EVENTO' && !dto.eventoId) {
+      throw new BadRequestException('Selecione o evento');
+    }
     for (const l of dto.lotes) {
       if (!l.loteId) throw new BadRequestException('Lote obrigatório em cada linha');
       if (!l.quantidade || Number(l.quantidade) <= 0) {
@@ -158,24 +162,58 @@ export class MovimentacoesService {
       }
     }
 
+    // Se for saida pra evento, valida que o evento existe e nao esta finalizado
+    let evento: any = null;
+    if (dto.destinoSaida === 'EVENTO' && dto.eventoId) {
+      evento = await this.prisma.evento.findUnique({ where: { id: dto.eventoId } });
+      if (!evento) throw new BadRequestException('Evento não encontrado');
+      if (evento.status === 'FINALIZADO' || evento.status === 'CANCELADO') {
+        throw new BadRequestException(`Evento já está ${evento.status.toLowerCase()}`);
+      }
+    }
+
     // ── Pre-validacao: verifica saldos disponiveis e violacoes de minimo ──
     const violacoesMinimo: any[] = [];
-    // Agrupa quantidades por itemId pra checar minimo do agregado
     const totalPorItem: Record<string, { item: any; subtotal: number }> = {};
 
     for (const l of dto.lotes) {
       const lote = await this.prisma.lote.findUnique({
         where: { id: l.loteId },
-        include: { item: true },
+        include: { item: true, reservas: { where: { ativa: true }, include: { evento: true } } },
       });
       if (!lote) throw new BadRequestException(`Lote ${l.loteId} não encontrado`);
       if (!lote.ativo) throw new BadRequestException(`Lote ${lote.codigoLote} já está esgotado`);
       const qtd = Number(l.quantidade);
-      if (qtd > Number(lote.quantidadeAtual)) {
-        throw new BadRequestException(
-          `Saldo insuficiente no lote ${lote.codigoLote}: disponível ${lote.quantidadeAtual} ${lote.item.unidadeMedida}, solicitado ${qtd}`,
-        );
+
+      // ── Verificacao de reservas ──
+      const reservadoTotal = lote.reservas.reduce((s, r) => s + Number(r.quantidadeReservada), 0);
+
+      if (dto.destinoSaida === 'EVENTO') {
+        // Saida pra evento: precisa ter reserva ativa neste evento com saldo suficiente
+        const reservaDesteEvento = lote.reservas.find((r) => r.eventoId === dto.eventoId);
+        if (!reservaDesteEvento) {
+          throw new BadRequestException(
+            `Lote ${lote.codigoLote} não está reservado para este evento. Adicione a reserva primeiro.`,
+          );
+        }
+        if (qtd > Number(reservaDesteEvento.quantidadeReservada)) {
+          throw new BadRequestException(
+            `Saldo insuficiente na reserva do lote ${lote.codigoLote}: reservado ${reservaDesteEvento.quantidadeReservada} ${lote.item.unidadeMedida}, solicitado ${qtd}.`,
+          );
+        }
+      } else {
+        // Saida comum: respeita reservas (saldo disponivel = atual - reservado)
+        const disponivel = Number(lote.quantidadeAtual) - reservadoTotal;
+        if (qtd > disponivel) {
+          const detalhe = reservadoTotal > 0
+            ? ` (${reservadoTotal} ${lote.item.unidadeMedida} estão reservados para eventos)`
+            : '';
+          throw new BadRequestException(
+            `Saldo disponível insuficiente no lote ${lote.codigoLote}: ${disponivel} ${lote.item.unidadeMedida}${detalhe}, solicitado ${qtd}.`,
+          );
+        }
       }
+
       const grupo = totalPorItem[lote.itemId] || { item: lote.item, subtotal: 0 };
       grupo.subtotal += qtd;
       totalPorItem[lote.itemId] = grupo;
@@ -208,8 +246,9 @@ export class MovimentacoesService {
         data: {
           tipo: 'SAIDA',
           destinoSaida: dto.destinoSaida,
-          beneficiarioId: dto.beneficiarioId || null,
-          setorId: dto.setorId || null,
+          beneficiarioId: dto.destinoSaida === 'BENEFICIARIO' ? dto.beneficiarioId : null,
+          setorId: dto.destinoSaida === 'SETOR' ? dto.setorId : null,
+          eventoId: dto.destinoSaida === 'EVENTO' ? dto.eventoId : null,
           finalidade: dto.finalidade,
           observacao: dto.observacao,
           confirmadoMinimo: dto.confirmadoMinimo || false,
@@ -234,6 +273,23 @@ export class MovimentacoesService {
         },
       });
       itensRecalcular.add(r.itemId);
+
+      // Se for saida pra evento, ABATE TAMBEM da reserva
+      if (dto.destinoSaida === 'EVENTO' && dto.eventoId) {
+        const reserva = await this.prisma.reservaEvento.findUnique({
+          where: { eventoId_loteId: { eventoId: dto.eventoId, loteId: l.loteId } },
+        });
+        if (reserva) {
+          const novaQtd = Number(reserva.quantidadeReservada) - Number(l.quantidade);
+          await this.prisma.reservaEvento.update({
+            where: { id: reserva.id },
+            data: {
+              quantidadeReservada: Math.max(0, novaQtd),
+              ativa: novaQtd > 0,
+            },
+          });
+        }
+      }
     }
 
     for (const itemId of itensRecalcular) {
@@ -242,7 +298,7 @@ export class MovimentacoesService {
 
     await this.prisma.logAuditoria.create({
       data: { acao: 'SAIDA', entidade: 'Movimentacao', entidadeId: mov.id, usuarioId,
-        detalhes: { destino: dto.destinoSaida, numLotes: dto.lotes.length, confirmadoMinimo: dto.confirmadoMinimo || false } },
+        detalhes: { destino: dto.destinoSaida, eventoId: dto.eventoId, numLotes: dto.lotes.length, confirmadoMinimo: dto.confirmadoMinimo || false } },
     });
 
     // ── Notificacoes pos-saida (silencioso em caso de falha) ──
@@ -271,11 +327,16 @@ export class MovimentacoesService {
       this.logger.warn(`Falha ao criar notificacao pos-saida: ${e.message}`);
     }
 
+    // Auto-inicia o evento ao primeiro consumo
+    if (evento && evento.status === 'PLANEJADO') {
+      await this.prisma.evento.update({ where: { id: evento.id }, data: { status: 'EM_ANDAMENTO' } });
+    }
+
     return this.prisma.movimentacao.findUnique({
       where: { id: mov.id },
       include: {
         itens: { include: { item: true, lote: true } },
-        beneficiario: true, setor: true,
+        beneficiario: true, setor: true, evento: true,
       },
     });
   }

@@ -30,6 +30,14 @@ enum TipoMovimentacao {
 enum DestinoSaida {
   BENEFICIARIO
   SETOR
+  EVENTO
+}
+
+enum StatusEvento {
+  PLANEJADO
+  EM_ANDAMENTO
+  FINALIZADO
+  CANCELADO
 }
 
 enum StatusValidade {
@@ -134,11 +142,58 @@ model Lote {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   movimentacaoItens MovimentacaoItem[]
+  reservas          ReservaEvento[]
 
   @@index([itemId])
   @@index([codigoLote])
   @@index([dataValidade])
   @@map("lotes")
+}
+
+// ────────────────────────────────────────────────────────────────────
+// EVENTO: ação organizada que reserva e consome estoque.
+// Ex: distribuição mensal, campanha de Natal, evento beneficente.
+// Reservas BLOQUEIAM o saldo disponível dos lotes.
+// Ao FINALIZAR, sobras voltam automaticamente ao estoque.
+// ────────────────────────────────────────────────────────────────────
+model Evento {
+  id           String       @id @default(uuid())
+  nome         String
+  descricao    String?
+  dataInicio   DateTime     @map("data_inicio") @db.Date
+  dataFim      DateTime?    @map("data_fim") @db.Date
+  responsavel  String?
+  status       StatusEvento @default(PLANEJADO)
+  observacao   String?
+  finalizadoEm DateTime?    @map("finalizado_em")
+  ativo        Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  reservas      ReservaEvento[]
+  movimentacoes Movimentacao[]
+
+  @@index([status])
+  @@map("eventos")
+}
+
+model ReservaEvento {
+  id                  String   @id @default(uuid())
+  eventoId            String   @map("evento_id")
+  loteId              String   @map("lote_id")
+  quantidadeReservada Decimal  @map("quantidade_reservada") @db.Decimal(10, 2)
+  // Quando o evento finaliza/cancela ou a reserva e removida, fica inativa
+  // e o saldo do lote volta a estar disponivel.
+  ativa               Boolean  @default(true)
+  observacao          String?
+  createdAt           DateTime @default(now())
+
+  evento Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  lote   Lote   @relation(fields: [loteId], references: [id])
+
+  @@unique([eventoId, loteId])
+  @@index([loteId, ativa])
+  @@map("reservas_evento")
 }
 
 model Doador {
@@ -195,6 +250,8 @@ model Movimentacao {
   beneficiario   Beneficiario? @relation(fields: [beneficiarioId], references: [id])
   setorId        String?       @map("setor_id")
   setor          Setor?        @relation(fields: [setorId], references: [id])
+  eventoId       String?       @map("evento_id")
+  evento         Evento?       @relation(fields: [eventoId], references: [id])
   estornoDeId    String?       @unique @map("estorno_de_id")
   estornoDe      Movimentacao? @relation("Estorno", fields: [estornoDeId], references: [id])
   estornadoPor   Movimentacao? @relation("Estorno")

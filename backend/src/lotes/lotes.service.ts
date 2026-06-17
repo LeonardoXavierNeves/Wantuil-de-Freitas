@@ -88,6 +88,9 @@ export class LotesService {
   /**
    * Busca um lote pelo codigo lido na etiqueta.
    * Usado pelo scanner na tela de Saidas.
+   *
+   * Retorna tambem quantidadeReservada (em eventos ativos) para que o frontend
+   * possa exibir o saldo disponivel real.
    */
   async findByCodigo(codigo: string) {
     const codigoLimpo = (codigo || '').trim().toUpperCase();
@@ -95,21 +98,28 @@ export class LotesService {
 
     const lote = await this.prisma.lote.findUnique({
       where: { codigoLote: codigoLimpo },
-      include: { item: true, doador: true, setor: true },
+      include: {
+        item: true, doador: true, setor: true,
+        reservas: {
+          where: { ativa: true },
+          include: { evento: { select: { id: true, nome: true, status: true } } },
+        },
+      },
     });
 
     if (!lote) return { encontrado: false, codigo: codigoLimpo };
+    const reservadoTotal = lote.reservas.reduce((s, r) => s + Number(r.quantidadeReservada), 0);
+    const disponivel = Math.max(0, Number(lote.quantidadeAtual) - reservadoTotal);
+
     if (!lote.ativo) {
       return {
-        encontrado: true,
-        esgotado: true,
-        lote: { ...lote, statusValidade: calcularStatusLote(lote.dataValidade) },
+        encontrado: true, esgotado: true,
+        lote: { ...lote, statusValidade: calcularStatusLote(lote.dataValidade), reservadoTotal, disponivel },
       };
     }
     return {
-      encontrado: true,
-      esgotado: false,
-      lote: { ...lote, statusValidade: calcularStatusLote(lote.dataValidade) },
+      encontrado: true, esgotado: false,
+      lote: { ...lote, statusValidade: calcularStatusLote(lote.dataValidade), reservadoTotal, disponivel },
     };
   }
 
@@ -227,6 +237,29 @@ export class LotesService {
       data: { saldoAtual: total },
     });
     return total;
+  }
+
+  /**
+   * Soma as reservas ATIVAS (em eventos não finalizados) de um lote.
+   */
+  async somaReservasAtivas(loteId: string): Promise<number> {
+    const agg = await this.prisma.reservaEvento.aggregate({
+      where: { loteId, ativa: true },
+      _sum: { quantidadeReservada: true },
+    });
+    return Number(agg._sum.quantidadeReservada || 0);
+  }
+
+  /**
+   * Saldo disponivel = quantidadeAtual − soma das reservas ativas.
+   * O que pode ser usado em saidas comuns (nao vinculadas a evento).
+   */
+  async calcularDisponivel(loteId: string): Promise<{ atual: number; reservado: number; disponivel: number }> {
+    const lote = await this.prisma.lote.findUnique({ where: { id: loteId } });
+    if (!lote) return { atual: 0, reservado: 0, disponivel: 0 };
+    const reservado = await this.somaReservasAtivas(loteId);
+    const atual = Number(lote.quantidadeAtual);
+    return { atual, reservado, disponivel: Math.max(0, atual - reservado) };
   }
 
   /**

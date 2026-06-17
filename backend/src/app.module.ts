@@ -15,6 +15,7 @@ import { NotificacoesModule } from './notificacoes/notificacoes.module';
 import { ProdutosExternosModule } from './produtos-externos/produtos-externos.module';
 import { LotesModule } from './lotes/lotes.module';
 import { SistemaModule } from './sistema/sistema.module';
+import { EventosModule } from './eventos/eventos.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SistemaModule } from './sistema/sistema.module';
     ProdutosExternosModule,
     LotesModule,
     SistemaModule,
+    EventosModule,
   ],
 })
 export class AppModule {}
