@@ -83,12 +83,17 @@ export default function Dashboard() {
               }}>
                 <Icon name={c.icon} size={16} color={c.color} style={{ marginTop: 1 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{i.nome}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    {i._t === 'MINIMO' ? i.nome : (i.item?.nome || i.nome)}
+                  </div>
                   <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
                     {i._t === 'MINIMO'
                       ? `Saldo ${i.saldoAtual} ${i.unidadeMedida} (mínimo: ${i.estoqueMinimo})`
-                      : STATUS_VALIDADE[i.statusValidade]?.label}
-                    {i.dataValidade ? ` · Val: ${fmtData(i.dataValidade)}` : ''}
+                      : <>
+                          <span style={{ fontFamily: 'monospace' }}>{i.codigoLote}</span>
+                          {' · '}{i.quantidadeAtual} {i.item?.unidadeMedida}
+                          {i.dataValidade ? ` · Val: ${fmtData(i.dataValidade)}` : ''}
+                        </>}
                   </div>
                 </div>
               </div>

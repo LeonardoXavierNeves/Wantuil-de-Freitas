@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import Icon, { IconName } from '../components/Icon';
-import { fmtData, STATUS_VALIDADE } from '../utils/format';
+import { fmtData } from '../utils/format';
 
 export default function Validade() {
   const [dados, setDados] = useState<any>(null);
@@ -9,11 +9,11 @@ export default function Validade() {
   useEffect(() => { carregar(); }, []);
   function carregar() { api.get('/itens/alertas').then((r) => setDados(r.data)); }
 
-  async function registrarDescarte(itemId: string, nome: string, saldo: number) {
-    const motivo = prompt(`Registrar descarte de "${nome}". Informe o motivo:`);
+  async function registrarDescarte(loteId: string, codigoLote: string, nomeItem: string, qtd: number) {
+    const motivo = prompt(`Registrar descarte do lote ${codigoLote} (${nomeItem}, ${qtd} un).\n\nMotivo:`);
     if (!motivo) return;
     try {
-      await api.post('/movimentacoes/descarte', { itemId, quantidade: saldo, motivo });
+      await api.post('/movimentacoes/descarte', { loteId, quantidade: qtd, motivo });
       alert('Descarte registrado.');
       carregar();
     } catch (e: any) {
@@ -21,9 +21,7 @@ export default function Validade() {
     }
   }
 
-  if (!dados) {
-    return <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>;
-  }
+  if (!dados) return <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>;
 
   const cards = [
     { label: 'Para descarte', val: dados.descarte.length, cor: 'var(--r-600)', bg: 'var(--r-50)', icon: 'trash' as IconName },
@@ -32,10 +30,10 @@ export default function Validade() {
     { label: 'Abaixo do mínimo', val: dados.abaixoMinimo.length, cor: 'var(--r-600)', bg: 'var(--r-50)', icon: 'archive' as IconName },
   ];
 
-  const grupos: { titulo: string; items: any[]; key: string; icon: IconName; cor: string }[] = [
-    { titulo: 'Descarte obrigatório', icon: 'trash', cor: 'var(--r-600)', items: dados.descarte, key: 'descarte' },
-    { titulo: 'Período adicional (vencidos há até 6 meses)', icon: 'clock', cor: 'var(--or)', items: dados.adicional, key: 'adicional' },
-    { titulo: 'Próximos ao vencimento (≤ 30 dias)', icon: 'alert-triangle', cor: 'var(--a-600)', items: dados.proximoVencimento, key: 'proximo' },
+  const grupos: { titulo: string; lotes: any[]; icon: IconName; cor: string; permiteDescarte: boolean }[] = [
+    { titulo: 'Descarte obrigatório (vencidos há mais de 6 meses)', icon: 'trash', cor: 'var(--r-600)', lotes: dados.descarte, permiteDescarte: true },
+    { titulo: 'Período adicional (vencidos há até 6 meses)', icon: 'clock', cor: 'var(--or)', lotes: dados.adicional, permiteDescarte: true },
+    { titulo: 'Próximos ao vencimento (≤ 30 dias)', icon: 'alert-triangle', cor: 'var(--a-600)', lotes: dados.proximoVencimento, permiteDescarte: false },
   ];
 
   return (
@@ -50,73 +48,78 @@ export default function Validade() {
               <Icon name={c.icon} size={18} />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', textTransform: 'uppercase',
-                letterSpacing: '.04em', fontWeight: 600 }}>{c.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                {c.label}
+              </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: c.cor }}>{c.val}</div>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{
-        background: 'var(--primary-bg)', border: '1px solid var(--primary-lt)',
-        borderRadius: 8, padding: 14, marginBottom: 18,
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <Icon name="bell" size={20} color="var(--primary-dk)" />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Resumo semanal automático</div>
-          <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
-            Enviado todo sábado às 08h00 (Brasília) para os usuários autorizados
-          </div>
-        </div>
-      </div>
-
-      {grupos.filter((g) => g.items.length > 0).map((g) => (
-        <div className="card" key={g.key} style={{ marginBottom: 14, padding: 0 }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)',
-            display: 'flex', alignItems: 'center', gap: 8 }}>
+      {grupos.map((g) => g.lotes.length > 0 && (
+        <div key={g.titulo} className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <Icon name={g.icon} size={16} color={g.cor} />
             <span style={{ fontSize: 13, fontWeight: 600 }}>{g.titulo}</span>
-            <span className="pill neutral" style={{ marginLeft: 'auto' }}>{g.items.length}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>· {g.lotes.length} lote(s)</span>
           </div>
-          <table className="table table-responsive">
-            <thead>
-              <tr><th>Item</th><th>Setor</th><th>Saldo</th><th>Validade</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody>
-              {g.items.map((i: any) => (
-                <tr key={i.id}>
-                  <td data-label="Item" style={{ fontWeight: 600 }}>{i.nome}</td>
-                  <td data-label="Setor">{i.setor?.nome || '—'}</td>
-                  <td data-label="Saldo">{i.saldoAtual} {i.unidadeMedida}</td>
-                  <td data-label="Validade">{fmtData(i.dataValidade)}</td>
-                  <td data-label="Status">
-                    <span className={`pill ${STATUS_VALIDADE[i.statusValidade]?.cor}`}>
-                      {STATUS_VALIDADE[i.statusValidade]?.label}
-                    </span>
-                  </td>
-                  <td data-actions style={{ textAlign: 'right' }}>
-                    {g.key === 'descarte' && (
-                      <button className="btn sm danger" onClick={() => registrarDescarte(i.id, i.nome, Number(i.saldoAtual))}>
-                        <Icon name="trash" size={12} /> Descartar
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-responsive">
+            <table className="table">
+              <thead><tr>
+                <th>Lote</th><th>Item</th><th>Saldo</th><th>Validade</th><th></th>
+              </tr></thead>
+              <tbody>
+                {g.lotes.map((l: any) => (
+                  <tr key={l.id}>
+                    <td data-label="Lote" style={{ fontFamily: 'monospace', fontSize: 12 }}>{l.codigoLote}</td>
+                    <td data-label="Item"><strong>{l.item.nome}</strong></td>
+                    <td data-label="Saldo">{l.quantidadeAtual} {l.item.unidadeMedida}</td>
+                    <td data-label="Validade">{fmtData(l.dataValidade)}</td>
+                    <td data-label="Ação">
+                      {g.permiteDescarte && (
+                        <button className="btn danger sm"
+                          onClick={() => registrarDescarte(l.id, l.codigoLote, l.item.nome, Number(l.quantidadeAtual))}>
+                          <Icon name="trash" size={12} /> Descartar
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
 
-      {grupos.every(g => g.items.length === 0) && (
+      {dados.abaixoMinimo.length > 0 && (
         <div className="card">
-          <div className="empty-state">
-            <Icon name="check" size={40} color="var(--green)" style={{ margin: '0 auto 12px' }} />
-            <div className="empty-state-title">Tudo em ordem</div>
-            <div style={{ fontSize: 12 }}>Nenhum item próximo ao vencimento.</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Icon name="archive" size={16} color="var(--r-600)" />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Itens abaixo do estoque mínimo</span>
           </div>
+          <div className="table-responsive">
+            <table className="table">
+              <thead><tr><th>Item</th><th>Saldo</th><th>Mínimo</th></tr></thead>
+              <tbody>
+                {dados.abaixoMinimo.map((i: any) => (
+                  <tr key={i.id}>
+                    <td data-label="Item"><strong>{i.nome}</strong></td>
+                    <td data-label="Saldo">{i.saldoAtual} {i.unidadeMedida}</td>
+                    <td data-label="Mínimo">{i.estoqueMinimo} {i.unidadeMedida}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {grupos.every(g => g.lotes.length === 0) && dados.abaixoMinimo.length === 0 && (
+        <div className="empty-state">
+          <Icon name="check-circle" size={36} color="var(--green)" style={{ margin: '0 auto 12px' }} />
+          <div className="empty-state-title">Tudo em dia</div>
+          <div className="empty-state-desc">Nenhum lote precisa de atenção no momento.</div>
         </div>
       )}
     </div>

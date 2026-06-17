@@ -18,6 +18,15 @@ export default function Itens() {
   const [eanPre, setEanPre] = useState('');
   const [nomePre, setNomePre] = useState('');
   const [categoriaPre, setCategoriaPre] = useState('');
+  const [lotesItem, setLotesItem] = useState<any | null>(null);
+  const [lotesData, setLotesData] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (lotesItem) {
+      api.get('/lotes', { params: { itemId: lotesItem.id, ativo: true } })
+        .then(r => setLotesData(r.data));
+    } else { setLotesData([]); }
+  }, [lotesItem]);
 
   useEffect(() => {
     carregar();
@@ -37,13 +46,8 @@ export default function Itens() {
     setShowForm(true);
   }
 
-  function imprimirEtiqueta(item: any) {
-    const qtd = prompt('Quantas etiquetas imprimir?', '1');
-    if (!qtd) return;
-    const token = localStorage.getItem('token');
-    fetch(`${import.meta.env.VITE_API_URL || '/api'}/etiquetas/${item.id}?qtd=${qtd}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then((r) => r.blob()).then((b) => window.open(URL.createObjectURL(b), '_blank'));
+  function verLotes(item: any) {
+    setLotesItem(item);
   }
 
   async function excluir(item: any) {
@@ -93,7 +97,7 @@ export default function Itens() {
           <thead>
             <tr>
               <th>Código</th><th>EAN</th><th>Item</th><th>Setor</th><th>Saldo</th>
-              <th>Mín.</th><th>Validade</th><th>Status</th><th style={{ textAlign: 'right' }}>Ações</th>
+              <th>Mín.</th><th>Lotes</th><th style={{ textAlign: 'right' }}>Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -108,17 +112,14 @@ export default function Itens() {
                   {i.saldoAtual} {i.unidadeMedida}
                 </td>
                 <td data-label="Mínimo" style={{ color: 'var(--text-2)' }}>{i.estoqueMinimo}</td>
-                <td data-label="Validade" style={{ fontSize: 12, color: 'var(--text-2)' }}>{fmtData(i.dataValidade)}</td>
-                <td data-label="Status">
-                  <span className={`pill ${STATUS_VALIDADE[i.statusValidade]?.cor || 'green'}`}>
-                    {STATUS_VALIDADE[i.statusValidade]?.label}
-                  </span>
+                <td data-label="Lotes">
+                  <button className="btn sm ghost" onClick={() => verLotes(i)}
+                    style={{ padding: '2px 8px', fontSize: 11 }}>
+                    <Icon name="layers" size={12} /> Ver lotes
+                  </button>
                 </td>
                 <td data-actions style={{ textAlign: 'right' }}>
                   <div style={{ display: 'inline-flex', gap: 4 }}>
-                    <button className="btn icon sm" onClick={() => imprimirEtiqueta(i)} title="Imprimir etiqueta" aria-label="Etiqueta">
-                      <Icon name="tag" size={13} />
-                    </button>
                     {podeFazer('itens.editar') && (
                       <button className="btn icon sm" onClick={() => { setEditando(i); setShowForm(true); }} title="Editar" aria-label="Editar">
                         <Icon name="pencil" size={13} />
@@ -159,6 +160,53 @@ export default function Itens() {
           categorias={categorias}
           onClose={() => setShowForm(false)}
           onSave={() => { setShowForm(false); carregar(); }} />
+      )}
+
+      {lotesItem && (
+        <div className="modal-overlay" onClick={() => setLotesItem(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <Icon name="layers" size={18} color="var(--primary)" />
+                <div style={{ minWidth: 0 }}>
+                  <div className="modal-title" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Lotes de "{lotesItem.nome}"
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                    Saldo total: {lotesItem.saldoAtual} {lotesItem.unidadeMedida} em {lotesData.length} lote(s)
+                  </div>
+                </div>
+              </div>
+              <button className="btn icon sm ghost" onClick={() => setLotesItem(null)} aria-label="Fechar">
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+            {lotesData.length === 0 ? (
+              <div className="empty-state">
+                <Icon name="layers" size={28} color="var(--text-3)" style={{ margin: '0 auto 8px' }} />
+                <div className="empty-state-title">Nenhum lote ativo</div>
+                <div className="empty-state-desc">Quando entrarem doações deste produto, os lotes aparecerão aqui.</div>
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table">
+                  <thead><tr><th>Código do lote</th><th>Entrada</th><th>Validade</th><th>Saldo</th><th>Doador</th></tr></thead>
+                  <tbody>
+                    {lotesData.map((l) => (
+                      <tr key={l.id}>
+                        <td data-label="Lote" style={{ fontFamily: 'monospace', fontSize: 11 }}>{l.codigoLote}</td>
+                        <td data-label="Entrada" style={{ fontSize: 12 }}>{fmtData(l.dataEntrada)}</td>
+                        <td data-label="Validade" style={{ fontSize: 12 }}>{l.dataValidade ? fmtData(l.dataValidade) : '—'}</td>
+                        <td data-label="Saldo"><strong>{l.quantidadeAtual}</strong> {lotesItem.unidadeMedida}</td>
+                        <td data-label="Doador" style={{ fontSize: 12, color: 'var(--text-2)' }}>{l.doador?.nome || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

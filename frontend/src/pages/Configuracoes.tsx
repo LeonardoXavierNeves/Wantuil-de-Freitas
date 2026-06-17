@@ -8,7 +8,7 @@ const PERFIS = ['ADMIN', 'ALMOXARIFE', 'GESTOR', 'OPERADOR'];
 
 export default function Configuracoes() {
   const { podeFazer } = useAuth();
-  const [tab, setTab] = useState<'usuarios' | 'categorias' | 'notificacoes'>('usuarios');
+  const [tab, setTab] = useState<'usuarios' | 'categorias' | 'notificacoes' | 'sistema'>('usuarios');
 
   if (!podeFazer('configuracoes')) {
     return (
@@ -31,6 +31,7 @@ export default function Configuracoes() {
           { id: 'usuarios', label: 'Usuários', icon: 'users' as const },
           { id: 'categorias', label: 'Categorias', icon: 'tag' as const },
           { id: 'notificacoes', label: 'Notificações', icon: 'bell' as const },
+          { id: 'sistema', label: 'Sistema', icon: 'settings' as const },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id as any)}
             style={{
@@ -49,6 +50,103 @@ export default function Configuracoes() {
       {tab === 'usuarios' && <Usuarios />}
       {tab === 'categorias' && <Categorias />}
       {tab === 'notificacoes' && <Notificacoes />}
+      {tab === 'sistema' && <Sistema />}
+    </div>
+  );
+}
+
+function Sistema() {
+  const [estatisticas, setEstatisticas] = useState<any>(null);
+  const [resetando, setResetando] = useState(false);
+  const [resultado, setResultado] = useState<any>(null);
+
+  useEffect(() => { api.get('/sistema/estatisticas').then((r) => setEstatisticas(r.data)); }, []);
+
+  async function fazerReset() {
+    const c1 = prompt(
+      'ATENÇÃO: Esta operação vai APAGAR todas as movimentações, lotes existentes, ' +
+      'logs e notificações, e ZERAR o saldo de todos os itens.\n\n' +
+      'Cadastros (itens, categorias, setores, doadores, beneficiários) serão MANTIDOS.\n\n' +
+      'Digite RESETAR para confirmar:',
+    );
+    if (c1 !== 'RESETAR') return;
+    const c2 = confirm('Tem CERTEZA? Essa ação não pode ser desfeita.');
+    if (!c2) return;
+
+    setResetando(true);
+    try {
+      const { data } = await api.post('/sistema/reset-para-lotes');
+      setResultado(data);
+      const { data: novasEst } = await api.get('/sistema/estatisticas');
+      setEstatisticas(novasEst);
+    } catch (e: any) {
+      alert(e.response?.data?.message || 'Erro ao executar reset');
+    } finally { setResetando(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <Icon name="chart-bar" size={16} color="var(--primary-dk)" />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Estado atual do sistema</span>
+        </div>
+        {!estatisticas ? <span className="spinner" /> : (
+          <div className="grid-4" style={{ marginTop: 12 }}>
+            {[
+              { label: 'Itens cadastrados', val: estatisticas.itens },
+              { label: 'Lotes', val: estatisticas.lotesAtivos, sub: `de ${estatisticas.lotes} totais` },
+              { label: 'Movimentações', val: estatisticas.movimentacoes },
+              { label: 'Doadores', val: estatisticas.doadores },
+              { label: 'Beneficiários', val: estatisticas.beneficiarios },
+              { label: 'Usuários', val: estatisticas.usuarios },
+            ].map((kpi: any, i) => (
+              <div key={i} style={{ padding: 12, borderRadius: 8, background: 'var(--surface-2)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-2)', textTransform: 'uppercase' }}>{kpi.label}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary-dk)' }}>{kpi.val}</div>
+                {kpi.sub && <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{kpi.sub}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ border: '1px solid var(--r-200)', background: 'var(--r-50)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <Icon name="alert-triangle" size={16} color="var(--r-600)" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--r-600)' }}>Zona de risco</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5 }}>
+          <strong>Resetar para começar a usar lotes.</strong> Esta operação apaga toda
+          movimentação, lotes e logs existentes, e zera os saldos. Os cadastros
+          (itens, categorias, doadores, beneficiários, usuários, setores) são mantidos.
+          <br /><br />
+          Use isso <strong>uma única vez</strong> após migrar o sistema para o modelo
+          de lotes, para começar com o estoque limpo.
+        </div>
+        <button className="btn danger" onClick={fazerReset} disabled={resetando}>
+          {resetando
+            ? <><span className="spinner" /> Resetando…</>
+            : <><Icon name="trash" size={14} /> Resetar para começar a usar lotes</>}
+        </button>
+
+        {resultado && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 8,
+            background: 'var(--green-bg)', border: '1px solid var(--green)' }}>
+            <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: 13, marginBottom: 6 }}>
+              ✓ {resultado.mensagem}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+              {resultado.contagens.movimentacoes} movimentações,&nbsp;
+              {resultado.contagens.lotes} lotes,&nbsp;
+              {resultado.contagens.movimentacaoItens} itens de movimentação,&nbsp;
+              {resultado.contagens.logs} logs e&nbsp;
+              {resultado.contagens.notificacoes} notificações apagados.&nbsp;
+              {resultado.contagens.itensZerados} itens com saldo zerado.
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

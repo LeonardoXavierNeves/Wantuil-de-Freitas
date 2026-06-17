@@ -1,22 +1,28 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
-import Scanner from '../components/Scanner';
 import Icon from '../components/Icon';
 import { fmtData } from '../utils/format';
 
-interface ItemLote { itemId: string; nome: string; quantidade: number; dataValidade?: string; codigoEan?: string }
+interface LinhaLote {
+  itemId: string;
+  itemNome: string;
+  unidade: string;
+  quantidade: number;
+  dataValidade: string;
+  observacao: string;
+}
 
 export default function Entradas() {
   const [doadores, setDoadores] = useState<any[]>([]);
   const [doadorId, setDoadorId] = useState('');
   const [observacao, setObservacao] = useState('');
-  const [itens, setItens] = useState<ItemLote[]>([]);
+  const [linhas, setLinhas] = useState<LinhaLote[]>([]);
   const [movs, setMovs] = useState<any[]>([]);
-  const [showScanner, setShowScanner] = useState(false);
   const [busca, setBusca] = useState('');
   const [sugestoes, setSugestoes] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+  const [ultimoResultado, setUltimoResultado] = useState<any | null>(null);
 
   useEffect(() => {
     api.get('/doadores').then((r) => setDoadores(r.data));
@@ -36,39 +42,55 @@ export default function Entradas() {
   }
 
   function adicionarItem(i: any) {
-    if (itens.find((it) => it.itemId === i.id)) return;
-    setItens([...itens, { itemId: i.id, nome: i.nome, quantidade: 1, codigoEan: i.codigoEan, dataValidade: '' }]);
+    setLinhas([...linhas, {
+      itemId: i.id, itemNome: i.nome, unidade: i.unidadeMedida,
+      quantidade: 1, dataValidade: '', observacao: '',
+    }]);
     setBusca(''); setSugestoes([]);
   }
 
+  function atualizar(idx: number, dados: Partial<LinhaLote>) {
+    const v = [...linhas]; v[idx] = { ...v[idx], ...dados }; setLinhas(v);
+  }
+  function remover(idx: number) { setLinhas(linhas.filter((_, i) => i !== idx)); }
+
   async function salvar() {
-    if (!itens.length) { setErro('Adicione ao menos um item'); return; }
-    setSalvando(true); setErro('');
+    if (!linhas.length) { setErro('Adicione ao menos um produto'); return; }
+    setSalvando(true); setErro(''); setUltimoResultado(null);
     try {
-      await api.post('/movimentacoes/entrada', {
-        doadorId: doadorId || undefined, observacao,
-        itens: itens.map((i) => ({ itemId: i.itemId, quantidade: i.quantidade, dataValidade: i.dataValidade || undefined })),
+      const { data } = await api.post('/movimentacoes/entrada', {
+        doadorId: doadorId || undefined,
+        observacao,
+        lotes: linhas.map((l) => ({
+          itemId: l.itemId,
+          quantidade: l.quantidade,
+          dataValidade: l.dataValidade || undefined,
+          observacao: l.observacao || undefined,
+        })),
       });
-      setItens([]); setDoadorId(''); setObservacao('');
+      setLinhas([]); setObservacao(''); setDoadorId('');
+      setUltimoResultado(data);
       carregarMovs();
-      alert('Entrada registrada com sucesso.');
     } catch (e: any) {
       setErro(e.response?.data?.message || 'Erro ao registrar');
     } finally { setSalvando(false); }
   }
 
-  function imprimirEtiquetas(item: ItemLote) {
+  function imprimirEtiquetas(loteId: string, qtd: number) {
     const token = localStorage.getItem('token');
-    fetch(`${import.meta.env.VITE_API_URL || '/api'}/etiquetas/${item.itemId}?qtd=${item.quantidade}`, {
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/etiquetas/lote/${loteId}?qtd=${qtd}`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((r) => r.blob()).then((b) => window.open(URL.createObjectURL(b), '_blank'));
   }
 
   return (
     <div>
-      <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 18 }} className="desktop-only">Entradas — Doações Recebidas</h2>
+      <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 18 }} className="desktop-only">
+        Entradas — Doações Recebidas
+      </h2>
 
       <div className="grid-2">
+        {/* ── Form ── */}
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
             <Icon name="arrow-down" size={16} color="var(--green)" />
@@ -78,36 +100,34 @@ export default function Entradas() {
           <label className="label">Doador</label>
           <select className="select" value={doadorId}
             onChange={(e) => setDoadorId(e.target.value)} style={{ marginBottom: 14 }}>
-            <option value="">Doação avulsa (sem doador identificado)</option>
+            <option value="">Doação avulsa (sem doador)</option>
             {doadores.map((d: any) => <option key={d.id} value={d.id}>{d.nome}</option>)}
           </select>
 
           <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: '.04em' }}>Itens da doação</div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 600, marginBottom: 8,
+              textTransform: 'uppercase', letterSpacing: '.04em' }}>
+              Produtos a cadastrar (cada linha = 1 lote)
+            </div>
 
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8, position: 'relative' }}>
-              <input className="input" placeholder="Buscar item ou digitar código"
-                value={busca} onChange={(e) => setBusca(e.target.value)} style={{ flex: 1 }} />
-              <button type="button" className="btn" onClick={() => setShowScanner(true)} title="Scanner">
-                <Icon name="barcode" size={14} />
-              </button>
+            <div style={{ position: 'relative', marginBottom: 10 }}>
+              <input className="input" placeholder="Buscar produto pelo nome ou código…"
+                value={busca} onChange={(e) => setBusca(e.target.value)} />
               {sugestoes.length > 0 && (
                 <div style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
                   background: 'var(--surface)', border: '1px solid var(--border-2)',
-                  borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: 'auto',
+                  borderRadius: 6, zIndex: 10, maxHeight: 220, overflowY: 'auto',
                   boxShadow: '0 6px 16px rgba(0,0,0,0.08)',
                 }}>
                   {sugestoes.map((s) => (
                     <div key={s.id} onClick={() => adicionarItem(s)}
-                      style={{ padding: '8px 12px', cursor: 'pointer',
-                        borderBottom: '1px solid var(--border)' }}
+                      style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{s.nome}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                        Saldo: {s.saldoAtual} {s.unidadeMedida}
+                        Saldo atual: {s.saldoAtual} {s.unidadeMedida}
                       </div>
                     </div>
                   ))}
@@ -115,49 +135,51 @@ export default function Entradas() {
               )}
             </div>
 
-            {itens.length === 0 && (
-              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-3)' }}>
-                Nenhum item adicionado ainda
+            {linhas.length === 0 && (
+              <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-3)' }}>
+                Nenhum produto adicionado. Busque acima para começar.
               </div>
             )}
 
-            {itens.map((it, idx) => (
+            {linhas.map((l, idx) => (
               <div key={idx} style={{
-                background: 'var(--surface-2)', borderRadius: 6,
-                padding: 10, marginBottom: 6,
+                background: 'var(--surface-2)', borderRadius: 6, padding: 10, marginBottom: 6,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.nome}</div>
+                      overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.itemNome}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                      1 lote será criado com a quantidade abaixo
+                    </div>
                   </div>
-                  <button className="btn icon sm" onClick={() => imprimirEtiquetas(it)} title="Etiquetas">
-                    <Icon name="tag" size={13} />
-                  </button>
-                  <button className="btn icon sm" onClick={() => setItens(itens.filter((_, i) => i !== idx))} title="Remover">
+                  <button className="btn icon sm" onClick={() => remover(idx)} title="Remover">
                     <Icon name="x" size={13} />
                   </button>
                 </div>
                 <div className="grid-2" style={{ gap: 6 }}>
                   <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 2 }}>Quantidade</div>
-                    <input className="input" type="number" min="1" value={it.quantidade}
-                      onChange={(e) => { const v = [...itens]; v[idx].quantidade = parseFloat(e.target.value) || 0; setItens(v); }} />
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 2 }}>
+                      Quantidade ({l.unidade})
+                    </div>
+                    <input className="input" type="number" min="1" step="any" value={l.quantidade}
+                      onChange={(e) => atualizar(idx, { quantidade: parseFloat(e.target.value) || 0 })} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 2 }}>Validade (opcional)</div>
-                    <input className="input" type="date" value={it.dataValidade}
-                      onChange={(e) => { const v = [...itens]; v[idx].dataValidade = e.target.value; setItens(v); }} />
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 2 }}>
+                      Validade (opcional)
+                    </div>
+                    <input className="input" type="date" value={l.dataValidade}
+                      onChange={(e) => atualizar(idx, { dataValidade: e.target.value })} />
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <label className="label">Observações</label>
+          <label className="label">Observações da entrada</label>
           <textarea className="input" rows={2} value={observacao}
-            onChange={(e) => setObservacao(e.target.value)}
-            style={{ marginBottom: 14, resize: 'vertical' }} placeholder="Opcional" />
+            onChange={(e) => setObservacao(e.target.value)} style={{ marginBottom: 14, resize: 'vertical' }} />
 
           {erro && (
             <div style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--r-50)',
@@ -171,8 +193,37 @@ export default function Entradas() {
             onClick={salvar} disabled={salvando}>
             {salvando ? <><span className="spinner" /> Salvando</> : <><Icon name="check" size={14} /> Confirmar entrada</>}
           </button>
+
+          {/* Lotes recém-criados com botão de etiqueta */}
+          {ultimoResultado && ultimoResultado.itens?.length > 0 && (
+            <div style={{
+              marginTop: 14, padding: 12, borderRadius: 8,
+              background: 'var(--green-bg)', border: '1px solid var(--green)',
+            }}>
+              <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600, marginBottom: 8 }}>
+                Entrada registrada — imprimir etiquetas:
+              </div>
+              {ultimoResultado.itens.map((mi: any) => mi.lote && (
+                <div key={mi.lote.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 0', borderBottom: '1px solid var(--border)',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{mi.item.nome}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'monospace' }}>
+                      {mi.lote.codigoLote} · {mi.quantidade} {mi.item.unidadeMedida}
+                    </div>
+                  </div>
+                  <button className="btn sm primary" onClick={() => imprimirEtiquetas(mi.lote.id, Math.ceil(Number(mi.quantidade)))}>
+                    <Icon name="tag" size={13} /> {Math.ceil(Number(mi.quantidade))} etiqueta(s)
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* ── Histórico ── */}
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Icon name="file-text" size={16} color="var(--primary)" />
@@ -190,7 +241,7 @@ export default function Entradas() {
                   {m.itens.map((mi: any) => mi.item.nome).join(', ')}
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600, flexShrink: 0 }}>
-                  +{m.itens.reduce((s: number, mi: any) => s + Number(mi.quantidade), 0)} un
+                  +{m.itens.reduce((s: number, mi: any) => s + Number(mi.quantidade), 0)}
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
@@ -198,28 +249,8 @@ export default function Entradas() {
               </div>
             </div>
           ))}
-
-          <div style={{
-            marginTop: 16, padding: 12,
-            background: 'var(--primary-bg)', borderRadius: 8,
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <Icon name="bell" size={16} color="var(--primary-dk)" />
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Próximo resumo</div>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>Sábado às 08h00</div>
-            </div>
-          </div>
         </div>
       </div>
-
-      {showScanner && (
-        <Scanner
-          onClose={() => setShowScanner(false)}
-          onItemEncontrado={(i) => adicionarItem(i)}
-          onCadastroManual={(ean) => alert(`Código ${ean} não cadastrado. Vá em "Itens" para cadastrar.`)}
-        />
-      )}
     </div>
   );
 }

@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
-import Scanner from '../components/Scanner';
+import ScannerLote from '../components/ScannerLote';
 import Icon from '../components/Icon';
 import { fmtData } from '../utils/format';
 
-interface ItemLote { itemId: string; nome: string; quantidade: number; saldoAtual: number; estoqueMinimo: number; unidade: string }
+interface LinhaLoteSaida {
+  loteId: string;
+  codigoLote: string;
+  itemNome: string;
+  unidade: string;
+  quantidade: number;
+  disponivel: number;
+  dataValidade?: string;
+}
 
 export default function Saidas() {
   const [destinoTipo, setDestinoTipo] = useState<'BENEFICIARIO' | 'SETOR'>('BENEFICIARIO');
@@ -12,11 +20,9 @@ export default function Saidas() {
   const [finalidade, setFinalidade] = useState('');
   const [beneficiarios, setBeneficiarios] = useState<any[]>([]);
   const [setores, setSetores] = useState<any[]>([]);
-  const [itens, setItens] = useState<ItemLote[]>([]);
+  const [linhas, setLinhas] = useState<LinhaLoteSaida[]>([]);
   const [movs, setMovs] = useState<any[]>([]);
   const [showScanner, setShowScanner] = useState(false);
-  const [busca, setBusca] = useState('');
-  const [sugestoes, setSugestoes] = useState<any[]>([]);
   const [violacoes, setViolacoes] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
@@ -27,44 +33,55 @@ export default function Saidas() {
     carregarMovs();
   }, []);
 
-  useEffect(() => {
-    if (busca.length < 2) { setSugestoes([]); return; }
-    const t = setTimeout(() => api.get('/itens', { params: { busca } }).then((r) => setSugestoes(r.data.slice(0, 5))), 200);
-    return () => clearTimeout(t);
-  }, [busca]);
-
   function carregarMovs() {
     api.get('/movimentacoes', { params: { tipo: 'SAIDA' } }).then((r) => setMovs(r.data.slice(0, 6)));
   }
 
-  function adicionarItem(i: any) {
-    if (itens.find((it) => it.itemId === i.id)) return;
-    setItens([...itens, {
-      itemId: i.id, nome: i.nome, quantidade: 1,
-      saldoAtual: Number(i.saldoAtual), estoqueMinimo: Number(i.estoqueMinimo),
-      unidade: i.unidadeMedida,
+  function adicionarLote(lote: any) {
+    // Se ja existe na lista, soma +1 (varios scans da mesma etiqueta = mais unidades)
+    const existe = linhas.findIndex((l) => l.loteId === lote.id);
+    if (existe >= 0) {
+      const v = [...linhas];
+      v[existe].quantidade = Math.min(v[existe].quantidade + 1, v[existe].disponivel);
+      setLinhas(v);
+      return;
+    }
+    setLinhas([...linhas, {
+      loteId: lote.id,
+      codigoLote: lote.codigoLote,
+      itemNome: lote.item.nome,
+      unidade: lote.item.unidadeMedida,
+      quantidade: 1,
+      disponivel: Number(lote.quantidadeAtual),
+      dataValidade: lote.dataValidade,
     }]);
-    setBusca(''); setSugestoes([]);
   }
 
-  async function salvar(confirmarMinimo = false) {
+  function atualizarQtd(idx: number, qtd: number) {
+    const v = [...linhas];
+    v[idx].quantidade = Math.min(Math.max(0, qtd), v[idx].disponivel);
+    setLinhas(v);
+  }
+  function remover(idx: number) { setLinhas(linhas.filter((_, i) => i !== idx)); }
+
+  async function salvar(confirmadoMinimo = false) {
     if (!destinoId) { setErro('Selecione um destino'); return; }
-    if (!itens.length) { setErro('Adicione ao menos um item'); return; }
+    if (!linhas.length) { setErro('Adicione ao menos um lote'); return; }
     setErro(''); setSalvando(true);
     try {
       const payload: any = {
         destinoSaida: destinoTipo,
         ...(destinoTipo === 'BENEFICIARIO' ? { beneficiarioId: destinoId } : { setorId: destinoId }),
         finalidade,
-        confirmadoMinimo: confirmarMinimo,
-        itens: itens.map((i) => ({ itemId: i.itemId, quantidade: i.quantidade })),
+        confirmadoMinimo,
+        lotes: linhas.map((l) => ({ loteId: l.loteId, quantidade: l.quantidade })),
       };
       const { data } = await api.post('/movimentacoes/saida', payload);
       if (data.requerConfirmacao) {
         setViolacoes(data.violacoes);
         return;
       }
-      setItens([]); setDestinoId(''); setFinalidade(''); setViolacoes([]);
+      setLinhas([]); setDestinoId(''); setFinalidade(''); setViolacoes([]);
       carregarMovs();
       alert('Saída registrada com sucesso.');
     } catch (e: any) {
@@ -74,7 +91,9 @@ export default function Saidas() {
 
   return (
     <div>
-      <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 18 }} className="desktop-only">Saídas — Distribuição</h2>
+      <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 18 }} className="desktop-only">
+        Saídas — Distribuição
+      </h2>
 
       <div className="grid-2">
         <div className="card">
@@ -95,7 +114,7 @@ export default function Saidas() {
             <div>
               <label className="label">{destinoTipo === 'BENEFICIARIO' ? 'Beneficiário' : 'Setor'} *</label>
               <select className="select" value={destinoId} onChange={(e) => setDestinoId(e.target.value)}>
-                <option value="">Selecione...</option>
+                <option value="">Selecione…</option>
                 {destinoTipo === 'BENEFICIARIO'
                   ? beneficiarios.map((b: any) => <option key={b.id} value={b.id}>{b.nome}</option>)
                   : setores.map((s: any) => <option key={s.id} value={s.id}>{s.nome}</option>)}
@@ -109,70 +128,46 @@ export default function Saidas() {
             placeholder="Ex: Cesta básica mensal" style={{ marginBottom: 12 }} />
 
           <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: '.04em' }}>Itens</div>
-
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8, position: 'relative' }}>
-              <input className="input" placeholder="Buscar item ou digitar código"
-                value={busca} onChange={(e) => setBusca(e.target.value)} style={{ flex: 1 }} />
-              <button type="button" className="btn" onClick={() => setShowScanner(true)} title="Scanner">
-                <Icon name="barcode" size={14} />
-              </button>
-              {sugestoes.length > 0 && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-                  background: 'var(--surface)', border: '1px solid var(--border-2)',
-                  borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: 'auto',
-                  boxShadow: '0 6px 16px rgba(0,0,0,0.08)',
-                }}>
-                  {sugestoes.map((s) => (
-                    <div key={s.id} onClick={() => adicionarItem(s)}
-                      style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{s.nome}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                        Saldo: {s.saldoAtual} {s.unidadeMedida}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 600, marginBottom: 8,
+              textTransform: 'uppercase', letterSpacing: '.04em' }}>
+              Lotes a retirar (escaneie a etiqueta)
             </div>
 
-            {itens.length === 0 && (
+            <button className="btn primary" onClick={() => setShowScanner(true)} style={{ width: '100%', justifyContent: 'center', marginBottom: 10 }}>
+              <Icon name="barcode" size={14} /> Escanear etiqueta de lote
+            </button>
+
+            {linhas.length === 0 && (
               <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-3)' }}>
-                Nenhum item adicionado
+                Nenhum lote adicionado.<br />
+                <span style={{ fontSize: 11 }}>
+                  Clique no botão acima para ler a etiqueta de cada lote que sairá.
+                </span>
               </div>
             )}
 
-            {itens.map((it, idx) => {
-              const resultado = it.saldoAtual - it.quantidade;
-              const violaMinimo = resultado <= it.estoqueMinimo;
-              const saldoInsuficiente = resultado < 0;
-              return (
-                <div key={idx} style={{
-                  background: saldoInsuficiente ? 'var(--r-50)' : violaMinimo ? 'var(--a-50)' : 'var(--surface-2)',
-                  borderRadius: 6, padding: 10, marginBottom: 6,
-                  border: saldoInsuficiente ? '1px solid var(--r-600)' : '1px solid transparent',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{it.nome}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                        Saldo: {it.saldoAtual} → após retirada: {resultado} · Mínimo: {it.estoqueMinimo}
-                      </div>
+            {linhas.map((l, idx) => (
+              <div key={idx} style={{
+                background: 'var(--surface-2)', borderRadius: 6, padding: 10, marginBottom: 6,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{l.itemNome}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'monospace' }}>
+                      {l.codigoLote} · disponível: {l.disponivel} {l.unidade}
+                      {l.dataValidade ? ` · val: ${fmtData(l.dataValidade)}` : ''}
                     </div>
-                    <input className="input" type="number" min="1" max={it.saldoAtual} value={it.quantidade}
-                      onChange={(e) => { const v = [...itens]; v[idx].quantidade = parseFloat(e.target.value) || 0; setItens(v); }}
-                      style={{ width: 72 }} />
-                    <button className="btn icon sm" onClick={() => setItens(itens.filter((_, i) => i !== idx))}>
-                      <Icon name="x" size={13} />
-                    </button>
                   </div>
+                  <input className="input" type="number" min="1" max={l.disponivel} step="any"
+                    value={l.quantidade}
+                    onChange={(e) => atualizarQtd(idx, parseFloat(e.target.value) || 0)}
+                    style={{ width: 78 }} />
+                  <button className="btn icon sm" onClick={() => remover(idx)} title="Remover">
+                    <Icon name="x" size={13} />
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
 
           {violacoes.length > 0 && (
@@ -183,12 +178,13 @@ export default function Saidas() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <Icon name="alert-triangle" size={16} color="var(--r-600)" />
                 <span style={{ fontWeight: 600, color: 'var(--r-600)', fontSize: 13 }}>
-                  Esta retirada deixa o estoque abaixo do mínimo
+                  Esta saída deixa o estoque abaixo do mínimo
                 </span>
               </div>
               {violacoes.map((v: any, i: number) => (
                 <div key={i} style={{ fontSize: 12, marginBottom: 4 }}>
-                  <strong>{v.item}</strong>: {v.saldoAtual} → <strong style={{ color: 'var(--r-600)' }}>{v.saldoResultante}</strong> (mínimo: {v.estoqueMinimo})
+                  <strong>{v.item}</strong>: {v.saldoAtual} → <strong style={{ color: 'var(--r-600)' }}>{v.saldoResultante}</strong>
+                  &nbsp;(mínimo: {v.estoqueMinimo})
                 </div>
               ))}
               <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
@@ -216,6 +212,7 @@ export default function Saidas() {
           )}
         </div>
 
+        {/* Histórico */}
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Icon name="file-text" size={16} color="var(--primary)" />
@@ -233,7 +230,7 @@ export default function Saidas() {
                   {m.itens.map((mi: any) => mi.item.nome).join(', ')}
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--r-600)', fontWeight: 600, flexShrink: 0 }}>
-                  −{m.itens.reduce((s: number, mi: any) => s + Number(mi.quantidade), 0)} un
+                  −{m.itens.reduce((s: number, mi: any) => s + Number(mi.quantidade), 0)}
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
@@ -245,10 +242,9 @@ export default function Saidas() {
       </div>
 
       {showScanner && (
-        <Scanner
+        <ScannerLote
           onClose={() => setShowScanner(false)}
-          onItemEncontrado={(i) => adicionarItem(i)}
-          onCadastroManual={() => alert('Item não cadastrado. Cadastre primeiro antes de dar saída.')}
+          onLoteEncontrado={(lote) => adicionarLote(lote)}
         />
       )}
     </div>
