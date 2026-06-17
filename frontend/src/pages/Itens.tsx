@@ -212,7 +212,7 @@ export default function Itens() {
   );
 }
 
-function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias, onClose, onSave }: any) {
+export function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, categorias, onClose, onSave }: any) {
   // Tenta pré-selecionar a categoria sugerida pelo nome
   const categoriaIdInicial = item?.categoriaId
     || categorias.find((c: any) => c.nome.toLowerCase() === (categoriaSugerida || '').toLowerCase())?.id

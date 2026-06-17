@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import Icon from '../components/Icon';
+import Scanner from '../components/Scanner';
+import { FormItem } from './Itens';
 import { fmtData } from '../utils/format';
 
 interface LinhaLote {
@@ -23,9 +25,17 @@ export default function Entradas() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [ultimoResultado, setUltimoResultado] = useState<any | null>(null);
+  // Scanner de EAN e cadastro rapido
+  const [showScanner, setShowScanner] = useState(false);
+  const [showCadastro, setShowCadastro] = useState(false);
+  const [eanParaCadastrar, setEanParaCadastrar] = useState('');
+  const [nomeSugerido, setNomeSugerido] = useState('');
+  const [categoriaSugerida, setCategoriaSugerida] = useState('');
+  const [categorias, setCategorias] = useState<any[]>([]);
 
   useEffect(() => {
     api.get('/doadores').then((r) => setDoadores(r.data));
+    api.get('/categorias').then((r) => setCategorias(r.data));
     carregarMovs();
   }, []);
 
@@ -42,11 +52,42 @@ export default function Entradas() {
   }
 
   function adicionarItem(i: any) {
-    setLinhas([...linhas, {
-      itemId: i.id, itemNome: i.nome, unidade: i.unidadeMedida,
-      quantidade: 1, dataValidade: '', observacao: '',
-    }]);
+    // Evita duplicar (se ja na lista, incrementa qtd)
+    const idx = linhas.findIndex((l) => l.itemId === i.id);
+    if (idx >= 0) {
+      const v = [...linhas]; v[idx].quantidade += 1; setLinhas(v);
+    } else {
+      setLinhas([...linhas, {
+        itemId: i.id, itemNome: i.nome, unidade: i.unidadeMedida,
+        quantidade: 1, dataValidade: '', observacao: '',
+      }]);
+    }
     setBusca(''); setSugestoes([]);
+  }
+
+  // Scanner: produto encontrado no catalogo
+  function aoLerProduto(item: any) {
+    adicionarItem(item);
+    setShowScanner(false);
+  }
+
+  // Scanner: produto nao cadastrado - oferece cadastro
+  function aoPedirCadastro(ean: string, nome?: string, categoria?: string) {
+    setShowScanner(false);
+    setEanParaCadastrar(ean);
+    setNomeSugerido(nome || '');
+    setCategoriaSugerida(categoria || '');
+    setShowCadastro(true);
+  }
+
+  // Apos cadastrar o item, busca pelo EAN e adiciona como linha
+  async function aoConcluirCadastro() {
+    setShowCadastro(false);
+    try {
+      const { data } = await api.get(`/itens/ean/${eanParaCadastrar}`);
+      if (data.encontrado) adicionarItem(data.item);
+    } catch {/* silencioso */}
+    setEanParaCadastrar(''); setNomeSugerido(''); setCategoriaSugerida('');
   }
 
   function atualizar(idx: number, dados: Partial<LinhaLote>) {
@@ -111,8 +152,14 @@ export default function Entradas() {
             </div>
 
             <div style={{ position: 'relative', marginBottom: 10 }}>
-              <input className="input" placeholder="Buscar produto pelo nome ou código…"
-                value={busca} onChange={(e) => setBusca(e.target.value)} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input className="input" placeholder="Buscar produto pelo nome ou código…" style={{ flex: 1 }}
+                  value={busca} onChange={(e) => setBusca(e.target.value)} />
+                <button className="btn" onClick={() => setShowScanner(true)} title="Ler código de barras"
+                  style={{ whiteSpace: 'nowrap' }}>
+                  <Icon name="barcode" size={14} /> Ler código
+                </button>
+              </div>
               {sugestoes.length > 0 && (
                 <div style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
@@ -251,6 +298,26 @@ export default function Entradas() {
           ))}
         </div>
       </div>
+
+      {showScanner && (
+        <Scanner
+          onClose={() => setShowScanner(false)}
+          onItemEncontrado={aoLerProduto}
+          onCadastroManual={aoPedirCadastro}
+        />
+      )}
+
+      {showCadastro && (
+        <FormItem
+          item={null}
+          eanInicial={eanParaCadastrar}
+          nomeInicial={nomeSugerido}
+          categoriaSugerida={categoriaSugerida}
+          categorias={categorias}
+          onClose={() => { setShowCadastro(false); setEanParaCadastrar(''); }}
+          onSave={aoConcluirCadastro}
+        />
+      )}
     </div>
   );
 }
