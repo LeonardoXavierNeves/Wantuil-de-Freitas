@@ -1,4 +1,4 @@
-import * as PDFDocument from 'pdfkit';
+import PDFDocument = require('pdfkit');
 
 interface Coluna {
   titulo: string;
