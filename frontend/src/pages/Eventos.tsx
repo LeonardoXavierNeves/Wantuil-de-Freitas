@@ -237,8 +237,20 @@ function DetalheEvento({ eventoId, onClose, onEditar }: any) {
     try {
       await api.post(`/eventos/${eventoId}/${endpoint}`);
       carregar();
-    } catch (e: any) { alert(e.response?.data?.message || 'Erro'); }
-    finally { setCarregando(false); }
+    } catch (e: any) {
+      alert('Erro: ' + (e.response?.data?.message || e.message || 'desconhecido'));
+    } finally { setCarregando(false); }
+  }
+
+  async function excluir() {
+    if (!confirm('Excluir este evento? Se houver reservas ou saídas registradas, ele será apenas desativado (histórico preservado).')) return;
+    try {
+      const { data } = await api.delete(`/eventos/${eventoId}`);
+      alert(data.mensagem);
+      onClose();
+    } catch (e: any) {
+      alert('Erro ao excluir: ' + (e.response?.data?.message || e.message));
+    }
   }
 
   async function removerReserva(reservaId: string) {
@@ -315,6 +327,11 @@ function DetalheEvento({ eventoId, onClose, onEditar }: any) {
                 <Icon name="pencil" size={12} /> Editar
               </button>
             </>
+          )}
+          {podeFazer('eventos.criar') && (
+            <button className="btn sm" onClick={excluir} style={{ color: 'var(--r-600)' }}>
+              <Icon name="trash" size={12} /> Excluir
+            </button>
           )}
           <button className="btn sm primary" onClick={baixarPdf} style={{ marginLeft: 'auto' }}>
             <Icon name="file-text" size={12} /> Relatório PDF

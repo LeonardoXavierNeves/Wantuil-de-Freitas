@@ -140,7 +140,17 @@ export default function ScannerLote({ onClose, onLoteEncontrado }: Props) {
               {resultado.codigoLote}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>
-              <div><strong>Disponível:</strong> {resultado.quantidadeAtual} {resultado.item.unidadeMedida}</div>
+              <div><strong>Saldo no lote:</strong> {resultado.quantidadeAtual} {resultado.item.unidadeMedida}</div>
+              {(resultado.reservadoTotal || 0) > 0 && (
+                <>
+                  <div style={{ color: 'var(--a-600)' }}>
+                    <strong>Reservado em eventos:</strong> {resultado.reservadoTotal} {resultado.item.unidadeMedida}
+                  </div>
+                  <div style={{ color: 'var(--green)' }}>
+                    <strong>Disponível p/ saída:</strong> {resultado.disponivel} {resultado.item.unidadeMedida}
+                  </div>
+                </>
+              )}
               {resultado.dataValidade && (
                 <div><strong>Validade:</strong> {new Date(resultado.dataValidade).toLocaleDateString('pt-BR')}</div>
               )}
