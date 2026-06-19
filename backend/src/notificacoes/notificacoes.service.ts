@@ -134,16 +134,34 @@ export class NotificacoesService {
   }
 
   // ═══════════ EMAIL ═══════════
+
+  /**
+   * Busca os destinatarios reais (usuarios ativos com receberEmail=true).
+   * Substitui o EMAIL_NOTIFICACOES fixo (antigo).
+   */
+  private async destinatarios(): Promise<{ emails: string[]; nomes: string[] }> {
+    const usuarios = await this.prisma.usuario.findMany({
+      where: { ativo: true, receberEmail: true, email: { not: '' } },
+      select: { nome: true, email: true },
+    });
+    return {
+      emails: usuarios.map((u) => u.email),
+      nomes: usuarios.map((u) => u.nome),
+    };
+  }
+
   async diagnosticoEmail() {
     const tem_api_key = !!process.env.RESEND_API_KEY;
     const tem_from = !!process.env.EMAIL_FROM;
-    const tem_destino = !!process.env.EMAIL_NOTIFICACOES;
+    const dest = await this.destinatarios();
     return {
-      configurado: tem_api_key && tem_destino,
+      configurado: tem_api_key && dest.emails.length > 0,
       detalhes: {
-        RESEND_API_KEY: tem_api_key ? 'OK (configurada)' : 'FALTANDO — configure no Render',
+        RESEND_API_KEY: tem_api_key ? 'OK (configurada)' : 'FALTANDO — configure no .env',
         EMAIL_FROM: process.env.EMAIL_FROM || '(usando padrão Almoxarifado <onboarding@resend.dev>)',
-        EMAIL_NOTIFICACOES: tem_destino ? process.env.EMAIL_NOTIFICACOES : 'FALTANDO — defina o e-mail destino',
+        DESTINATARIOS: dest.emails.length === 0
+          ? 'FALTANDO — nenhum usuário ativo com "Receber e-mail" marcado'
+          : `${dest.emails.length} usuário(s): ${dest.nomes.join(', ')}`,
       },
       observacao: !process.env.EMAIL_FROM
         ? 'Atenção: usando domínio padrão do Resend (onboarding@resend.dev). Esse domínio só envia para o e-mail da conta que criou no resend.com. Para enviar para outros destinatários, valide um domínio próprio em resend.com → Domains.'
@@ -157,11 +175,15 @@ export class NotificacoesService {
       return { sucesso: false, motivo: 'Configuracao incompleta', diagnostico: diag };
     }
     try {
+      const dest = await this.destinatarios();
       await this.enviarEmail(
         'Teste de notificação - Wantuil',
-        `Olá!\n\nEste é um e-mail de teste do Sistema de Almoxarifado da Wantuil de Freitas.\n\nSe você está lendo esta mensagem, o envio de e-mails está funcionando corretamente.\n\nEnviado em: ${fmtDataHora(new Date())}`,
+        `Olá!\n\nEste é um e-mail de teste do Sistema de Almoxarifado da Wantuil de Freitas.\n\nSe você está lendo esta mensagem, o envio de e-mails está funcionando corretamente.\n\nDestinatários cadastrados (${dest.emails.length}): ${dest.nomes.join(', ')}\n\nEnviado em: ${fmtDataHora(new Date())}`,
       );
-      return { sucesso: true, mensagem: `E-mail enviado para ${process.env.EMAIL_NOTIFICACOES}` };
+      return {
+        sucesso: true,
+        mensagem: `E-mail enviado para ${dest.emails.length} usuário(s): ${dest.nomes.join(', ')}`,
+      };
     } catch (e: any) {
       return { sucesso: false, motivo: e.message, diagnostico: diag };
     }
@@ -172,15 +194,23 @@ export class NotificacoesService {
       this.logger.warn('RESEND_API_KEY nao configurada - email nao enviado');
       throw new Error('RESEND_API_KEY não configurada no servidor');
     }
-    if (!process.env.EMAIL_NOTIFICACOES) {
-      throw new Error('EMAIL_NOTIFICACOES não configurada no servidor');
+    const dest = await this.destinatarios();
+    if (dest.emails.length === 0) {
+      throw new Error('Nenhum usuário ativo com "Receber notificações" marcado');
     }
+    // Usa BCC pra preservar privacidade dos destinatarios entre si.
+    // O campo "to" recebe o e-mail do remetente como placeholder.
+    const from = process.env.EMAIL_FROM || 'Almoxarifado <onboarding@resend.dev>';
+    // Extrai o endereco do EMAIL_FROM (pode estar no formato "Nome <email>")
+    const fromEmail = (from.match(/<([^>]+)>/)?.[1]) || from;
     await this.resend.emails.send({
-      from: process.env.EMAIL_FROM || 'Almoxarifado <onboarding@resend.dev>',
-      to: [process.env.EMAIL_NOTIFICACOES],
+      from,
+      to: [fromEmail],
+      bcc: dest.emails,
       subject: assunto,
       text: corpo,
     });
+    this.logger.log(`Email enviado para ${dest.emails.length} destinatario(s)`);
   }
 
   // ═══════════ CRON: Resumo semanal (sábado 08h Brasília = 11h UTC) ═══════════

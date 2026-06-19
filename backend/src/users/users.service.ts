@@ -10,7 +10,7 @@ export class UsersService {
 
   findAll() {
     return this.prisma.usuario.findMany({
-      select: { id: true, nome: true, email: true, perfil: true, ativo: true, createdAt: true },
+      select: { id: true, nome: true, email: true, perfil: true, ativo: true, receberEmail: true, createdAt: true },
       orderBy: { nome: 'asc' },
     });
   }
@@ -18,11 +18,11 @@ export class UsersService {
   findOne(id: string) {
     return this.prisma.usuario.findUnique({
       where: { id },
-      select: { id: true, nome: true, email: true, perfil: true, ativo: true },
+      select: { id: true, nome: true, email: true, perfil: true, ativo: true, receberEmail: true },
     });
   }
 
-  async create(data: { nome: string; email: string; senha: string; perfil: string }) {
+  async create(data: { nome: string; email: string; senha: string; perfil: string; receberEmail?: boolean }) {
     if (!data.email || !data.senha) {
       throw new BadRequestException('E-mail e senha sao obrigatorios');
     }
@@ -39,18 +39,18 @@ export class UsersService {
 
     const senhaHash = await bcrypt.hash(data.senha, 10);
 
-    // CRITICO: explicitar cada campo, NAO usar spread para evitar passar senha em texto plano
     const u = await this.prisma.usuario.create({
       data: {
         nome: data.nome,
         email: emailNormalizado,
         senha: senhaHash,
         perfil: data.perfil as any,
-        ativo: true, // explicito
+        ativo: true,
+        receberEmail: data.receberEmail ?? true,
       },
     });
 
-    return { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, ativo: u.ativo };
+    return { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, ativo: u.ativo, receberEmail: u.receberEmail };
   }
 
   async update(id: string, data: any) {
@@ -67,13 +67,14 @@ export class UsersService {
       updateData.perfil = data.perfil;
     }
     if (data.ativo !== undefined) updateData.ativo = data.ativo;
+    if (data.receberEmail !== undefined) updateData.receberEmail = !!data.receberEmail;
     if (data.senha) {
       if (data.senha.length < 6) throw new BadRequestException('Senha deve ter no minimo 6 caracteres');
       updateData.senha = await bcrypt.hash(data.senha, 10);
     }
 
     const u = await this.prisma.usuario.update({ where: { id }, data: updateData });
-    return { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, ativo: u.ativo };
+    return { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, ativo: u.ativo, receberEmail: u.receberEmail };
   }
 
   async desativar(id: string, idLogado: string) {
