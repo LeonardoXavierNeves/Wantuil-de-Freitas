@@ -190,7 +190,7 @@ function Usuarios() {
       </div>
       <table className="table table-responsive">
         <thead>
-          <tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th style={{ textAlign: 'right' }}>Ações</th></tr>
+          <tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th title="Recebe notificações por e-mail">Notif.</th><th style={{ textAlign: 'right' }}>Ações</th></tr>
         </thead>
         <tbody>
           {users.map((u) => (
@@ -201,6 +201,11 @@ function Usuarios() {
               <td data-label="E-mail">{u.email}</td>
               <td data-label="Perfil"><span className="pill blue">{u.perfil}</span></td>
               <td data-label="Status"><span className={`pill ${u.ativo ? 'green' : 'red'}`}>{u.ativo ? 'Ativo' : 'Inativo'}</span></td>
+              <td data-label="Notif." style={{ textAlign: 'center' }}>
+                {u.receberEmail
+                  ? <Icon name="check" size={14} color="var(--green)" />
+                  : <span style={{ color: 'var(--text-3)', fontSize: 14 }}>—</span>}
+              </td>
               <td data-actions style={{ textAlign: 'right' }}>
                 <div style={{ display: 'inline-flex', gap: 4 }}>
                   <button className="btn icon sm" onClick={() => { setEditando(u); setShowForm(true); }} title="Editar">
@@ -234,6 +239,7 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
     email: usuario?.email || '',
     senha: '',
     perfil: usuario?.perfil || 'OPERADOR',
+    receberEmail: usuario?.receberEmail ?? true,
   });
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
@@ -243,7 +249,7 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
     e.preventDefault(); setErro(''); setSalvando(true);
     try {
       if (usuario) {
-        const payload: any = { nome: form.nome, email: form.email, perfil: form.perfil };
+        const payload: any = { nome: form.nome, email: form.email, perfil: form.perfil, receberEmail: form.receberEmail };
         if (form.senha) payload.senha = form.senha;
         await api.patch(`/usuarios/${usuario.id}`, payload);
       } else {
@@ -287,6 +293,18 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
           onChange={(e) => setForm({ ...form, perfil: e.target.value })} style={{ marginBottom: 14 }}>
           {PERFIS.map((p) => <option key={p}>{p}</option>)}
         </select>
+
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" checked={form.receberEmail}
+            onChange={(e) => setForm({ ...form, receberEmail: e.target.checked })}
+            style={{ marginTop: 3 }} />
+          <span style={{ fontSize: 13, lineHeight: 1.4 }}>
+            <strong>Receber notificações por e-mail</strong>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+              Inclui alertas semanais de validade, estoque abaixo do mínimo e itens esgotados.
+            </div>
+          </span>
+        </label>
         <div style={{
           fontSize: 11, color: 'var(--text-2)', background: 'var(--surface-2)',
           padding: 10, borderRadius: 6, marginBottom: 14, lineHeight: 1.5,
