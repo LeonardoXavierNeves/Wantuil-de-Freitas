@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import Icon from './Icon';
@@ -50,6 +51,7 @@ export default function NotificacoesBell() {
   const [lista, setLista] = useState<Notificacao[]>([]);
   const [carregando, setCarregando] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
 
   // Polling da contagem a cada 60s
@@ -64,10 +66,13 @@ export default function NotificacoesBell() {
     if (aberto) carregarLista();
   }, [aberto]);
 
-  // Fecha ao clicar fora
+  // Fecha ao clicar fora (considera tambem o dropdown que esta em portal)
   useEffect(() => {
     function fechar(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const clicouNoBotao = containerRef.current?.contains(target);
+      const clicouNoDropdown = dropdownRef.current?.contains(target);
+      if (!clicouNoBotao && !clicouNoDropdown) {
         setAberto(false);
       }
     }
@@ -145,14 +150,32 @@ export default function NotificacoesBell() {
         )}
       </button>
 
-      {aberto && (
-        <div style={(() => {
-          // Posiciona em FIXED ancorado a viewport para nao ser cortado por
-          // overflow do topbar ou de containers ancestrais.
+      {aberto && createPortal(
+        <div ref={dropdownRef} style={(() => {
+          // Posiciona em FIXED ancorado a viewport. Renderizado via Portal
+          // direto em document.body para escapar de containers ancestrais
+          // que tenham transform/filter/will-change (que criariam um containing
+          // block local e impediriam o ancoramento na viewport).
           const rect = containerRef.current?.getBoundingClientRect();
+          const vw = window.innerWidth;
           const topo = (rect?.bottom ?? 56) + 8;
-          // Margem segura da borda direita
-          const direita = Math.max(8, window.innerWidth - (rect?.right ?? window.innerWidth));
+
+          // Em telas muito estreitas, ocupa quase toda a largura (8px de cada lado)
+          if (vw <= 480) {
+            return {
+              position: 'fixed' as const, top: topo, left: 8, right: 8,
+              background: 'var(--surface)',
+              borderRadius: 10,
+              boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+              border: '1px solid var(--border)',
+              zIndex: 10000,
+              maxHeight: 'calc(100vh - 80px)',
+              display: 'flex', flexDirection: 'column' as const,
+            };
+          }
+
+          // Desktop/tablet: alinha pelo lado direito do botao com margem
+          const direita = Math.max(8, vw - (rect?.right ?? vw));
           return {
             position: 'fixed' as const, top: topo, right: direita,
             width: 360, maxWidth: 'calc(100vw - 16px)',
@@ -160,7 +183,7 @@ export default function NotificacoesBell() {
             borderRadius: 10,
             boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
             border: '1px solid var(--border)',
-            zIndex: 1000,
+            zIndex: 10000,
             maxHeight: 'min(480px, calc(100vh - 80px))', display: 'flex', flexDirection: 'column' as const,
           };
         })()}>
@@ -236,7 +259,8 @@ export default function NotificacoesBell() {
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
