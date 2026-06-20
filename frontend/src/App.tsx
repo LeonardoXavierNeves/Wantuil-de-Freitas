@@ -11,7 +11,7 @@ import Validade from './pages/Validade';
 import Setores from './pages/Setores';
 import Eventos from './pages/Eventos';
 import Doadores from './pages/Doadores';
-import Beneficiarios from './pages/Beneficiarios';
+// import Beneficiarios from './pages/Beneficiarios';  // OCULTADO v2.7.4 (Wantuil não usa)
 import Relatorios from './pages/Relatorios';
 import Configuracoes from './pages/Configuracoes';
 
@@ -52,7 +52,7 @@ export default function App() {
           <Route path="setores" element={<Setores />} />
           <Route path="eventos" element={<Eventos />} />
           <Route path="doadores" element={<Doadores />} />
-          <Route path="beneficiarios" element={<Beneficiarios />} />
+          {/* <Route path="beneficiarios" element={<Beneficiarios />} />  OCULTADO v2.7.4 */}
           <Route path="relatorios" element={<RequerPermissao acao="relatorios.ver"><Relatorios /></RequerPermissao>} />
           <Route path="configuracoes" element={<RequerPermissao acao="configuracoes"><Configuracoes /></RequerPermissao>} />
         </Route>

@@ -21,7 +21,6 @@ const NAV: { grupo: string; links: NavLinkDef[] }[] = [
   ]},
   { grupo: 'Cadastros', links: [
     { to: '/doadores', label: 'Doadores', icon: 'heart' },
-    { to: '/beneficiarios', label: 'Beneficiários', icon: 'users' },
   ]},
   { grupo: 'Análise', links: [
     { to: '/relatorios', label: 'Relatórios', icon: 'chart-bar', requer: 'relatorios.ver' },

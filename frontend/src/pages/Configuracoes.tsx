@@ -59,8 +59,26 @@ function Sistema() {
   const [estatisticas, setEstatisticas] = useState<any>(null);
   const [resetando, setResetando] = useState(false);
   const [resultado, setResultado] = useState<any>(null);
+  const [limpando, setLimpando] = useState(false);
+  const [resultadoLimpeza, setResultadoLimpeza] = useState<any>(null);
 
   useEffect(() => { api.get('/sistema/estatisticas').then((r) => setEstatisticas(r.data)); }, []);
+
+  async function limparExemplos() {
+    const ok = confirm(
+      'Apagar categorias e setores de exemplo que ainda não foram usados?\n\n' +
+      'Itens cadastrados em uma categoria, ou movimentações vinculadas a um setor, ' +
+      'são preservados automaticamente.',
+    );
+    if (!ok) return;
+    setLimpando(true);
+    try {
+      const { data } = await api.post('/sistema/limpar-exemplos');
+      setResultadoLimpeza(data);
+    } catch (e: any) {
+      alert(e.response?.data?.message || 'Erro ao limpar dados de exemplo');
+    } finally { setLimpando(false); }
+  }
 
   async function fazerReset() {
     const c1 = prompt(
@@ -98,7 +116,6 @@ function Sistema() {
               { label: 'Lotes', val: estatisticas.lotesAtivos, sub: `de ${estatisticas.lotes} totais` },
               { label: 'Movimentações', val: estatisticas.movimentacoes },
               { label: 'Doadores', val: estatisticas.doadores },
-              { label: 'Beneficiários', val: estatisticas.beneficiarios },
               { label: 'Usuários', val: estatisticas.usuarios },
             ].map((kpi: any, i) => (
               <div key={i} style={{ padding: 12, borderRadius: 8, background: 'var(--surface-2)' }}>
@@ -107,6 +124,46 @@ function Sistema() {
                 {kpi.sub && <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{kpi.sub}</div>}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <Icon name="sparkles" size={16} color="var(--primary-dk)" />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Manutenção</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5 }}>
+          <strong>Limpar dados de exemplo.</strong> Remove as categorias e setores
+          que vieram pré-cadastrados no sistema (Alimentos, Higiene, Limpeza, Vestuário,
+          Medicamentos, Outros; Estoque Geral, Cozinha, Enfermaria, Abrigo)
+          <strong> apenas se ainda não foram usados</strong>. Itens cadastrados em uma
+          categoria, ou movimentações em um setor, preservam o registro automaticamente.
+        </div>
+        <button className="btn" onClick={limparExemplos} disabled={limpando}>
+          {limpando
+            ? <><span className="spinner" /> Limpando…</>
+            : <><Icon name="sparkles" size={14} /> Limpar dados de exemplo</>}
+        </button>
+
+        {resultadoLimpeza && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 8,
+            background: 'var(--green-bg)', border: '1px solid var(--green)' }}>
+            <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: 13, marginBottom: 6 }}>
+              ✓ {resultadoLimpeza.mensagem}
+            </div>
+            {(resultadoLimpeza.apagadas.categorias.length > 0 || resultadoLimpeza.apagadas.setores.length > 0) && (
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+                <strong>Apagados:</strong>{' '}
+                {[...resultadoLimpeza.apagadas.categorias, ...resultadoLimpeza.apagadas.setores].join(', ')}
+              </div>
+            )}
+            {(resultadoLimpeza.mantidos.categorias.length > 0 || resultadoLimpeza.mantidos.setores.length > 0) && (
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6, marginTop: 4 }}>
+                <strong>Mantidos (em uso):</strong>{' '}
+                {[...resultadoLimpeza.mantidos.categorias, ...resultadoLimpeza.mantidos.setores].join(', ')}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -494,8 +551,11 @@ function Notificacoes() {
           <span style={{ fontSize: 13, fontWeight: 600 }}>E-mail (resumo semanal)</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 14, lineHeight: 1.5 }}>
-          Além das notificações no sistema, o resumo de sábado também pode ser enviado por e-mail.
-          Para isso, configure no Render as variáveis <code>RESEND_API_KEY</code>, <code>EMAIL_FROM</code> (opcional) e <code>EMAIL_NOTIFICACOES</code>.
+          Além das notificações no sistema, alertas e o resumo de sábado são enviados por e-mail
+          para <strong>todos os usuários cadastrados</strong> que tiverem a opção
+          <em> "Receber notificações por e-mail"</em> marcada (gerenciado na aba <strong>Usuários</strong>).
+          A configuração técnica do servidor (variáveis <code>RESEND_API_KEY</code> e <code>EMAIL_FROM</code>)
+          é feita no <code>.env</code> da VPS.
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={verDiagnostico} disabled={!!acaoAtiva}>
@@ -520,9 +580,9 @@ function Notificacoes() {
               {diagnostico.configurado ? 'Configuração OK' : 'Configuração incompleta'}
             </div>
             <div style={{ fontFamily: 'monospace', fontSize: 11, lineHeight: 1.8, color: 'var(--text-2)' }}>
-              <div><strong>RESEND_API_KEY:</strong> {diagnostico.detalhes.RESEND_API_KEY}</div>
-              <div><strong>EMAIL_FROM:</strong> {diagnostico.detalhes.EMAIL_FROM}</div>
-              <div><strong>EMAIL_NOTIFICACOES:</strong> {diagnostico.detalhes.EMAIL_NOTIFICACOES}</div>
+              {Object.entries(diagnostico.detalhes).map(([k, v]) => (
+                <div key={k}><strong>{k}:</strong> {String(v)}</div>
+              ))}
             </div>
             {diagnostico.observacao && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--a-600)', lineHeight: 1.5 }}>
