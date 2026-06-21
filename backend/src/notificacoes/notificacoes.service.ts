@@ -185,7 +185,17 @@ export class NotificacoesService {
         mensagem: `E-mail enviado para ${dest.emails.length} usuário(s): ${dest.nomes.join(', ')}`,
       };
     } catch (e: any) {
-      return { sucesso: false, motivo: e.message, diagnostico: diag };
+      // O Resend devolve detalhes em e.response.body / e.response.statusCode.
+      // Tenta extrair a mensagem mais util para diagnosticar.
+      const detalhe = e?.response?.body?.message
+        || e?.response?.body?.error
+        || (typeof e?.response?.body === 'string' ? e.response.body : null)
+        || e?.message
+        || 'Erro desconhecido';
+      const status = e?.response?.statusCode || e?.statusCode;
+      const motivo = status ? `${detalhe} (HTTP ${status})` : detalhe;
+      this.logger.error(`Falha no testarEmail: ${motivo}`);
+      return { sucesso: false, motivo, diagnostico: diag };
     }
   }
 
@@ -213,7 +223,7 @@ export class NotificacoesService {
     this.logger.log(`Email enviado para ${dest.emails.length} destinatario(s)`);
   }
 
-  // ═══════════ CRON: Resumo semanal (sábado 08h Brasília = 11h UTC) ═══════════
+  // ═══════════ CRON: Resumo semanal (sábado 07h Cuiabá = 11h UTC) ═══════════
   @Cron('0 11 * * 6', { name: 'resumo-semanal' })
   async resumoSemanal() {
     this.logger.log('Cron: gerando resumo semanal...');
@@ -263,7 +273,8 @@ export class NotificacoesService {
     }
   }
 
-  // ═══════════ CRON: Verificação diária (08h Brasília) ═══════════
+  // ═══════════ CRON: Verificação diária in-app (07h Cuiabá = 11h UTC) ═══════════
+  // Apenas cria/atualiza notificacoes no sino (NAO envia email). Email so no sabado.
   @Cron('0 11 * * *', { name: 'verificacao-diaria' })
   async verificacaoDiariaCron() {
     this.logger.log('Cron: verificacao diaria de itens...');
