@@ -540,7 +540,7 @@ function Notificacoes() {
           </button>
         </div>
         <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 6, background: 'var(--surface-2)', fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
-          <strong>Verificação automática:</strong> todo dia às 08h e todo sábado às 08h (horário de Brasília).
+          <strong>Resumo semanal:</strong> enviado todo sábado às 7h da manhã.
         </div>
       </div>
 

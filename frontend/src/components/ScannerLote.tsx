@@ -65,7 +65,9 @@ export default function ScannerLote({ onClose, onLoteEncontrado }: Props) {
   function confirmar() {
     if (resultado) {
       onLoteEncontrado(resultado);
-      onClose();
+      // Nao chama onClose() aqui: quem usa o Scanner decide o proximo passo
+      // (em Saidas o pai fecha o scanner; em Eventos/Reserva o pai vai pra
+      // proxima tela do mesmo modal).
     }
   }
 

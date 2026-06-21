@@ -259,7 +259,7 @@ export default function Saidas() {
       {showScanner && (
         <ScannerLote
           onClose={() => setShowScanner(false)}
-          onLoteEncontrado={(lote) => adicionarLote(lote)}
+          onLoteEncontrado={(lote) => { adicionarLote(lote); setShowScanner(false); }}
         />
       )}
     </div>
