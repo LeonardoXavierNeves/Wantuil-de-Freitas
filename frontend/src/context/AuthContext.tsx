@@ -13,32 +13,58 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx>(null!);
 
 // Matriz de permissoes — deve espelhar o backend (PerfilGuard + @Perfis)
+//
+// Niveis:
+// - MASTER: dono do sistema (dev). Tudo + logs + diagnostico + reset.
+// - ADMIN: diretoria. Tudo do dia-a-dia + gestao de usuarios.
+// - ALMOXARIFE: operacao. Entradas, saidas, descartes, eventos, cadastro de itens.
+// - GESTOR: leitura + relatorios.
+// - OPERADOR: apenas saidas (voluntario de evento).
 const PERMISSOES: Record<string, string[]> = {
   // Itens
-  'itens.criar':        ['ADMIN', 'ALMOXARIFE'],
-  'itens.editar':       ['ADMIN', 'ALMOXARIFE'],
-  'itens.excluir':      ['ADMIN'],
+  'itens.criar':        ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'itens.editar':       ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'itens.excluir':      ['MASTER', 'ADMIN'],
+
   // Movimentacoes
-  'mov.entrada':        ['ADMIN', 'ALMOXARIFE'],
-  'mov.saida':          ['ADMIN', 'ALMOXARIFE'],
-  'mov.descarte':       ['ADMIN', 'ALMOXARIFE'],
-  'mov.estorno':        ['ADMIN'],
-  // Cadastros
-  'doadores.criar':     ['ADMIN', 'ALMOXARIFE', 'OPERADOR'],
-  'doadores.editar':    ['ADMIN', 'ALMOXARIFE', 'OPERADOR'],
-  'doadores.excluir':   ['ADMIN'],
-  'benef.criar':        ['ADMIN', 'ALMOXARIFE', 'OPERADOR'],
-  'benef.editar':       ['ADMIN', 'ALMOXARIFE', 'OPERADOR'],
-  'benef.excluir':      ['ADMIN'],
+  'mov.entrada':        ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'mov.saida':          ['MASTER', 'ADMIN', 'ALMOXARIFE', 'OPERADOR'],
+  'mov.descarte':       ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'mov.estorno':        ['MASTER', 'ADMIN'],
+
+  // Cadastros auxiliares
+  'doadores.criar':     ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'doadores.editar':    ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'doadores.excluir':   ['MASTER', 'ADMIN'],
+  'benef.criar':        ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'benef.editar':       ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'benef.excluir':      ['MASTER', 'ADMIN'],
+
   // Estrutura
-  'setores.gerenciar':  ['ADMIN'],
-  'categorias.gerenciar':['ADMIN'],
-  'usuarios.gerenciar': ['ADMIN'],
-  'eventos.criar':      ['ADMIN', 'ALMOXARIFE', 'GESTOR'],
-  // Visao
-  'relatorios.ver':     ['ADMIN', 'ALMOXARIFE', 'GESTOR'],
-  'auditoria.ver':      ['ADMIN'],
-  'configuracoes':      ['ADMIN'],
+  'setores.gerenciar':    ['MASTER', 'ADMIN'],
+  'categorias.gerenciar': ['MASTER', 'ADMIN'],
+  'usuarios.gerenciar':   ['MASTER', 'ADMIN'],
+  'usuarios.master':      ['MASTER'], // so MASTER cria/edita outros MASTERs
+
+  // Eventos
+  'eventos.criar':      ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'eventos.editar':     ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'eventos.excluir':    ['MASTER', 'ADMIN'],
+  'eventos.cancelar':   ['MASTER', 'ADMIN'],
+  'eventos.iniciar':    ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'eventos.finalizar':  ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'eventos.reservar':   ['MASTER', 'ADMIN', 'ALMOXARIFE'],
+  'eventos.baixar':     ['MASTER', 'ADMIN', 'ALMOXARIFE', 'OPERADOR'],
+
+  // Relatorios e auditoria
+  'relatorios.ver':     ['MASTER', 'ADMIN', 'ALMOXARIFE', 'GESTOR'],
+  'auditoria.ver':      ['MASTER'], // apenas MASTER ve logs tecnicos
+  'auditoria.exportar': ['MASTER'],
+
+  // Configuracoes
+  'config.geral':       ['MASTER', 'ADMIN'], // abas Usuarios, Categorias, Notificacoes-geral
+  'config.sistema':     ['MASTER'], // aba Sistema (reset, limpar exemplos)
+  'config.email-teste': ['MASTER'], // botoes de testar email / diagnostico Resend
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {

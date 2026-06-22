@@ -4,13 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import { excluirComConfirmacao } from '../utils/confirm';
 import Icon from '../components/Icon';
 
-const PERFIS = ['ADMIN', 'ALMOXARIFE', 'GESTOR', 'OPERADOR'];
+const PERFIS = ['MASTER', 'ADMIN', 'ALMOXARIFE', 'GESTOR', 'OPERADOR'];
 
 export default function Configuracoes() {
   const { podeFazer } = useAuth();
+  const podeSistema = podeFazer('config.sistema');
   const [tab, setTab] = useState<'usuarios' | 'categorias' | 'notificacoes' | 'sistema'>('usuarios');
 
-  if (!podeFazer('configuracoes')) {
+  if (!podeFazer('config.geral')) {
     return (
       <div className="card">
         <div className="empty-state">
@@ -22,17 +23,19 @@ export default function Configuracoes() {
     );
   }
 
+  const abas = [
+    { id: 'usuarios', label: 'Usuários', icon: 'users' as const, visivel: true },
+    { id: 'categorias', label: 'Categorias', icon: 'tag' as const, visivel: true },
+    { id: 'notificacoes', label: 'Notificações', icon: 'bell' as const, visivel: true },
+    { id: 'sistema', label: 'Sistema', icon: 'settings' as const, visivel: podeSistema },
+  ].filter(t => t.visivel);
+
   return (
     <div>
       <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 18 }} className="desktop-only">Configurações</h2>
 
       <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', marginBottom: 18, overflowX: 'auto' }}>
-        {[
-          { id: 'usuarios', label: 'Usuários', icon: 'users' as const },
-          { id: 'categorias', label: 'Categorias', icon: 'tag' as const },
-          { id: 'notificacoes', label: 'Notificações', icon: 'bell' as const },
-          { id: 'sistema', label: 'Sistema', icon: 'settings' as const },
-        ].map((t) => (
+        {abas.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id as any)}
             style={{
               padding: '10px 16px', fontSize: 13,
@@ -50,7 +53,7 @@ export default function Configuracoes() {
       {tab === 'usuarios' && <Usuarios />}
       {tab === 'categorias' && <Categorias />}
       {tab === 'notificacoes' && <Notificacoes />}
-      {tab === 'sistema' && <Sistema />}
+      {tab === 'sistema' && podeSistema && <Sistema />}
     </div>
   );
 }
@@ -291,6 +294,12 @@ function Usuarios() {
 }
 
 function FormUsuario({ usuario, onClose, onSave }: any) {
+  const { podeFazer } = useAuth();
+  const podeCriarMaster = podeFazer('usuarios.master');
+  // Lista de perfis que o usuario logado pode atribuir
+  const perfisDisponiveis = podeCriarMaster ? PERFIS : PERFIS.filter(p => p !== 'MASTER');
+  const editandoMaster = usuario?.perfil === 'MASTER';
+
   const [form, setForm] = useState({
     nome: usuario?.nome || '',
     email: usuario?.email || '',
@@ -347,9 +356,17 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
         </div>
         <label className="label">Perfil</label>
         <select className="select" value={form.perfil}
+          disabled={editandoMaster && !podeCriarMaster}
           onChange={(e) => setForm({ ...form, perfil: e.target.value })} style={{ marginBottom: 14 }}>
-          {PERFIS.map((p) => <option key={p}>{p}</option>)}
+          {perfisDisponiveis.map((p) => <option key={p}>{p}</option>)}
+          {/* Mostra MASTER como opcao "presa" se o usuario sendo editado for MASTER mas o ator nao puder editar */}
+          {editandoMaster && !podeCriarMaster && <option key="MASTER">MASTER</option>}
         </select>
+        {editandoMaster && !podeCriarMaster && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: -10, marginBottom: 12 }}>
+            Apenas usuários MASTER podem alterar contas MASTER.
+          </div>
+        )}
 
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 14, cursor: 'pointer' }}>
           <input type="checkbox" checked={form.receberEmail}
@@ -450,6 +467,8 @@ function Categorias() {
 }
 
 function Notificacoes() {
+  const { podeFazer } = useAuth();
+  const podeEmailTeste = podeFazer('config.email-teste');
   const [acaoAtiva, setAcaoAtiva] = useState<string | null>(null);
   const [resultado, setResultado] = useState<{ titulo: string; mensagem: string; tipo: 'sucesso' | 'aviso' | 'erro' } | null>(null);
   const [diagnostico, setDiagnostico] = useState<any>(null);
@@ -544,7 +563,8 @@ function Notificacoes() {
         </div>
       </div>
 
-      {/* E-mail */}
+      {/* E-mail (apenas MASTER — testes e diagnostico do Resend) */}
+      {podeEmailTeste && (
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Icon name="mail" size={16} color="var(--primary-dk)" />
@@ -592,6 +612,7 @@ function Notificacoes() {
           </div>
         )}
       </div>
+      )}
 
       {/* Feedback de operação */}
       {resultado && (
