@@ -127,10 +127,10 @@ export default function NotificacoesBell() {
         style={{
           background: 'transparent', border: 'none', cursor: 'pointer',
           padding: 8, borderRadius: 6, position: 'relative',
-          color: 'rgba(255,255,255,0.85)',
+          color: 'currentColor', // herda do pai (Layout decide se sidebar escuro ou topbar branco)
           display: 'flex', alignItems: 'center',
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(127,127,127,0.12)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         <Icon name="bell" size={18} />

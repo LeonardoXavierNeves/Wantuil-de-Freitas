@@ -53,7 +53,7 @@ export default function Layout() {
         <div style={{ padding: '20px 18px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0 }}><Logo /></div>
-            <div className="desktop-only"><NotificacoesBell /></div>
+            <div className="desktop-only" style={{ color: 'rgba(255,255,255,0.85)' }}><NotificacoesBell /></div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'rgba(255,255,255,0.55)', letterSpacing: '.04em' }}>
             Sistema de Almoxarifado
