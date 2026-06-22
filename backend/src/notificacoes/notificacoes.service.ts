@@ -2,10 +2,19 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { calcularStatusValidade } from '../itens/itens.service';
+import { calcularStatusLote } from '../lotes/lotes.service';
 import { Resend } from 'resend';
 import { fmtData, fmtDataHora } from '../common/data-fuso';
+import PDFDocument = require('pdfkit');
+import * as fs from 'fs';
+import * as path from 'path';
 
 type Severidade = 'INFO' | 'AVISO' | 'CRITICO';
+
+interface Anexo {
+  filename: string;
+  content: Buffer;
+}
 
 @Injectable()
 export class NotificacoesService {
@@ -201,7 +210,7 @@ export class NotificacoesService {
     }
   }
 
-  private async enviarEmail(assunto: string, corpo: string) {
+  private async enviarEmail(assunto: string, corpo: string, anexos?: Anexo[]) {
     if (!this.resend) {
       this.logger.warn('RESEND_API_KEY nao configurada - email nao enviado');
       throw new Error('RESEND_API_KEY não configurada no servidor');
@@ -212,11 +221,12 @@ export class NotificacoesService {
     }
     const from = process.env.EMAIL_FROM || 'Almoxarifado <onboarding@resend.dev>';
 
-    // Envia 1 email por destinatario.
-    // Motivo: o Resend com dominio padrao (onboarding@resend.dev) so entrega
-    // para o e-mail da conta. Usando BCC, ele aceita o envio (retorna 200)
-    // mas descarta silenciosamente os destinatarios. Enviar 1 por 1 deixa
-    // claro qual destinatario falhou, e funciona melhor com dominio proprio.
+    // Resend exige attachments no formato { filename, content: base64 }
+    const attachmentsResend = anexos?.map((a) => ({
+      filename: a.filename,
+      content: a.content.toString('base64'),
+    }));
+
     const erros: string[] = [];
     let enviados = 0;
     for (const email of dest.emails) {
@@ -226,6 +236,7 @@ export class NotificacoesService {
           to: [email],
           subject: assunto,
           text: corpo,
+          ...(attachmentsResend && attachmentsResend.length > 0 && { attachments: attachmentsResend }),
         });
         enviados++;
       } catch (e: any) {
@@ -239,7 +250,6 @@ export class NotificacoesService {
       throw new Error(`Nenhum e-mail foi entregue. Detalhes: ${erros.join(' | ')}`);
     }
     if (erros.length > 0) {
-      // Sucesso parcial. Loga mas nao falha.
       this.logger.warn(`Sucesso parcial: ${erros.length} falhas. ${erros.join(' | ')}`);
     }
   }
@@ -248,50 +258,246 @@ export class NotificacoesService {
   @Cron('0 11 * * 6', { name: 'resumo-semanal' })
   async resumoSemanal() {
     this.logger.log('Cron: gerando resumo semanal...');
-    const itens = await this.prisma.item.findMany({ where: { ativo: true }, include: { setor: true } });
-    const comStatus = itens.map((i) => ({ ...i, status: calcularStatusValidade(i.dataValidade) }));
-    const proximos = comStatus.filter((i) => i.status === 'PROXIMO');
-    const adicionais = comStatus.filter((i) => i.status === 'ADICIONAL');
-    const descartes = comStatus.filter((i) => i.status === 'DESCARTE');
-    const abaixoMinimo = comStatus.filter((i) => Number(i.saldoAtual) <= Number(i.estoqueMinimo) && Number(i.estoqueMinimo) > 0);
 
-    const totalAlertas = proximos.length + adicionais.length + descartes.length + abaixoMinimo.length;
-    const fmt = (i: any) =>
-      `- ${i.nome} (saldo: ${i.saldoAtual} ${i.unidadeMedida}${i.dataValidade ? `, val: ${fmtData(i.dataValidade)}` : ''})`;
+    // Levantamento: usa lotes para validade e itens para abaixo do minimo
+    const lotes = await this.prisma.lote.findMany({
+      where: { ativo: true },
+      include: { item: { include: { setor: true, categoria: true } } },
+    });
+    const lotesProximos = lotes.filter((l) => calcularStatusLote(l.dataValidade) === 'PROXIMO');
+    const lotesAdicional = lotes.filter((l) => calcularStatusLote(l.dataValidade) === 'ADICIONAL');
+    const lotesDescarte = lotes.filter((l) => calcularStatusLote(l.dataValidade) === 'DESCARTE');
 
-    const corpo = [
-      `RESUMO SEMANAL DO ALMOXARIFADO`,
-      `Data: ${fmtData(new Date())}`,
+    const itensAbaixoMinimo = await this.prisma.item.findMany({
+      where: { ativo: true, estoqueMinimo: { gt: 0 } },
+      include: { setor: true, categoria: true },
+    });
+    const abaixoMinimo = itensAbaixoMinimo.filter(
+      (i) => Number(i.saldoAtual) <= Number(i.estoqueMinimo),
+    );
+
+    const totalAlertas = lotesProximos.length + lotesAdicional.length + lotesDescarte.length + abaixoMinimo.length;
+
+    // Corpo de texto (resumo curto, mensagem do email)
+    const corpoEmail = [
+      `Olá!`,
+      ``,
+      `Segue o resumo semanal do almoxarifado da Wantuil de Freitas.`,
       ``,
       `Total de alertas: ${totalAlertas}`,
+      `• Próximos ao vencimento (até 30 dias): ${lotesProximos.length} lote(s)`,
+      `• Em período adicional (vencidos há até 6 meses): ${lotesAdicional.length} lote(s)`,
+      `• Para descarte (vencidos há mais de 6 meses): ${lotesDescarte.length} lote(s)`,
+      `• Itens abaixo do estoque mínimo: ${abaixoMinimo.length}`,
       ``,
-      `>> Próximos ao vencimento (30 dias): ${proximos.length}`,
-      ...proximos.map(fmt),
+      `O detalhamento completo está no PDF anexo.`,
       ``,
-      `>> Em período adicional (vencidos há até 6 meses): ${adicionais.length}`,
-      ...adicionais.map(fmt),
-      ``,
-      `>> Para descarte (vencidos há mais de 6 meses): ${descartes.length}`,
-      ...descartes.map(fmt),
-      ``,
-      `>> Abaixo do estoque mínimo: ${abaixoMinimo.length}`,
-      ...abaixoMinimo.map(fmt),
+      `--`,
+      `Sistema de Almoxarifado · Associação Espírita Wantuil de Freitas`,
+      `Cuiabá/MT · ${fmtDataHora(new Date())}`,
     ].join('\n');
 
+    // Notificacao in-app (mensagem curta)
     await this.prisma.notificacao.create({
       data: {
         tipo: 'RESUMO_SEMANAL',
         titulo: `Resumo semanal — ${totalAlertas} ${totalAlertas === 1 ? 'item precisa' : 'itens precisam'} de atenção`,
-        mensagem: corpo,
+        mensagem: corpoEmail,
       },
     });
 
     try {
-      await this.enviarEmail('Resumo Semanal do Almoxarifado', corpo);
-      this.logger.log('Resumo semanal enviado por email');
+      // Gera o PDF anexo e envia
+      const pdfBuffer = await this.gerarResumoSemanalPdf({
+        totalAlertas, lotesProximos, lotesAdicional, lotesDescarte, abaixoMinimo,
+      });
+      const dataArquivo = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      await this.enviarEmail(
+        `Resumo Semanal do Almoxarifado — ${fmtData(new Date())}`,
+        corpoEmail,
+        [{ filename: `resumo-semanal-${dataArquivo}.pdf`, content: pdfBuffer }],
+      );
+      this.logger.log(`Resumo semanal enviado por email (${totalAlertas} alertas)`);
     } catch (e: any) {
       this.logger.warn(`Resumo semanal: falha no email (${e.message}). Notificacao in-app criada normalmente.`);
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // PDF do resumo semanal — formato similar aos relatorios oficiais
+  // ─────────────────────────────────────────────────────────────────
+  private async gerarResumoSemanalPdf(dados: {
+    totalAlertas: number;
+    lotesProximos: any[];
+    lotesAdicional: any[];
+    lotesDescarte: any[];
+    abaixoMinimo: any[];
+  }): Promise<Buffer> {
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c));
+    const done = new Promise<Buffer>((res) => doc.on('end', () => res(Buffer.concat(chunks))));
+
+    const COR_PRIMARIA = '#4A9BA4';
+    const COR_AMARELO = '#F5C842';
+    const COR_AZUL = '#1E3668';
+    const COR_TEXTO_SUAVE = '#5A6B6E';
+    const COR_VERMELHO = '#C03A2B';
+    const COR_LARANJA = '#E0833A';
+
+    const yInicial = doc.y;
+    let xTexto = doc.page.margins.left + 12;
+
+    // Logo
+    try {
+      const candidatos = [
+        path.join(__dirname, '..', '..', 'assets', 'logo-wantuil.jpg'),
+        path.join(__dirname, '..', '..', '..', 'assets', 'logo-wantuil.jpg'),
+        path.join(process.cwd(), 'assets', 'logo-wantuil.jpg'),
+        path.join(process.cwd(), 'dist', 'assets', 'logo-wantuil.jpg'),
+      ];
+      const logoPath = candidatos.find((p) => fs.existsSync(p));
+      if (logoPath) {
+        doc.image(logoPath, doc.page.margins.left, yInicial, { width: 56, height: 56 });
+        xTexto = doc.page.margins.left + 68;
+      }
+    } catch {}
+
+    doc.rect(xTexto - 8, yInicial, 4, 60).fill(COR_AMARELO);
+    doc.fillColor(COR_PRIMARIA).fontSize(9).font('Helvetica-Bold')
+      .text('ASSOCIAÇÃO ESPÍRITA', xTexto, yInicial + 2);
+    doc.fontSize(16).font('Helvetica-Bold').text('Wantuil de Freitas', xTexto, yInicial + 14);
+    doc.fillColor(COR_TEXTO_SUAVE).fontSize(8).font('Helvetica')
+      .text('Resumo Semanal · Cuiabá/MT', xTexto, yInicial + 36);
+
+    doc.moveTo(doc.page.margins.left, yInicial + 70)
+      .lineTo(doc.page.width - doc.page.margins.right, yInicial + 70)
+      .strokeColor(COR_PRIMARIA).lineWidth(1.5).stroke();
+    doc.y = yInicial + 84;
+
+    // Titulo
+    doc.fillColor('#1A2A2C').fontSize(18).font('Helvetica-Bold').text('RESUMO SEMANAL');
+    doc.fillColor(COR_TEXTO_SUAVE).fontSize(10).font('Helvetica')
+      .text(`Gerado em ${fmtDataHora(new Date())}`);
+    doc.moveDown(0.8);
+
+    // KPIs
+    const kpis = [
+      { label: 'Total de alertas', val: dados.totalAlertas, cor: dados.totalAlertas === 0 ? '#3F9D5A' : COR_AZUL },
+      { label: 'Próx. vencimento', val: dados.lotesProximos.length, cor: COR_LARANJA },
+      { label: 'Período adicional', val: dados.lotesAdicional.length, cor: COR_LARANJA },
+      { label: 'Para descarte', val: dados.lotesDescarte.length, cor: COR_VERMELHO },
+      { label: 'Abaixo do mínimo', val: dados.abaixoMinimo.length, cor: COR_VERMELHO },
+    ];
+
+    const yKpi = doc.y;
+    const totalW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const wKpi = (totalW - 4 * 6) / 5;
+    kpis.forEach((k, i) => {
+      const x = doc.page.margins.left + i * (wKpi + 6);
+      doc.roundedRect(x, yKpi, wKpi, 56, 5).fillAndStroke('#F4F7F8', '#D9E3E5');
+      doc.fillColor(COR_TEXTO_SUAVE).fontSize(7).font('Helvetica')
+        .text(k.label.toUpperCase(), x + 8, yKpi + 10, { width: wKpi - 16 });
+      doc.fillColor(k.cor).fontSize(22).font('Helvetica-Bold')
+        .text(String(k.val), x + 8, yKpi + 24, { width: wKpi - 16 });
+    });
+    doc.y = yKpi + 70;
+
+    // ─── Caso sem alertas ─────────────────────────────────────────
+    if (dados.totalAlertas === 0) {
+      doc.fillColor('#3F9D5A').fontSize(13).font('Helvetica-Bold')
+        .text('✓ Nenhum item precisa de atenção esta semana.', { align: 'center' });
+      doc.moveDown(0.4);
+      doc.fillColor(COR_TEXTO_SUAVE).fontSize(10).font('Helvetica')
+        .text('O estoque está em conformidade — sem produtos próximos ao vencimento, em período adicional, para descarte ou abaixo do mínimo.',
+          { align: 'center', width: totalW });
+    } else {
+      // Tabelas de detalhe
+      const desenharTabela = (titulo: string, items: any[], cor: string, montaLinha: (i: any) => string[]) => {
+        if (items.length === 0) return;
+        if (doc.y > doc.page.height - 120) doc.addPage();
+        doc.fillColor(cor).fontSize(11).font('Helvetica-Bold').text(titulo.toUpperCase());
+        doc.moveDown(0.3);
+
+        // Header
+        const cols = [
+          { label: 'Lote/Item', w: 0.30 },
+          { label: 'Produto', w: 0.32 },
+          { label: 'Setor', w: 0.18 },
+          { label: 'Detalhe', w: 0.20 },
+        ];
+        let yH = doc.y;
+        doc.rect(doc.page.margins.left, yH, totalW, 18).fill(COR_AZUL);
+        let xH = doc.page.margins.left;
+        doc.fillColor('#FFF').font('Helvetica-Bold').fontSize(8);
+        cols.forEach((c) => {
+          doc.text(c.label.toUpperCase(), xH + 6, yH + 5, { width: totalW * c.w - 12, lineBreak: false });
+          xH += totalW * c.w;
+        });
+        doc.y = yH + 18;
+
+        doc.font('Helvetica').fontSize(8.5);
+        items.forEach((it, idx) => {
+          const valores = montaLinha(it);
+          const hMax = Math.max(...valores.map((v, i) =>
+            doc.heightOfString(v, { width: totalW * cols[i].w - 12 }),
+          ));
+          const alturaL = Math.min(32, Math.max(16, Math.ceil(hMax) + 6));
+          if (doc.y + alturaL > doc.page.height - 60) doc.addPage();
+          const yL = doc.y;
+          if (idx % 2 === 0) doc.rect(doc.page.margins.left, yL, totalW, alturaL).fill('#F4F7F8');
+          let xC = doc.page.margins.left;
+          doc.fillColor('#1A2A2C');
+          valores.forEach((v, i) => {
+            doc.text(v, xC + 6, yL + 4, {
+              width: totalW * cols[i].w - 12,
+              height: alturaL - 4,
+              ellipsis: true,
+            });
+            xC += totalW * cols[i].w;
+          });
+          doc.y = yL + alturaL;
+        });
+        doc.moveDown(0.6);
+      };
+
+      desenharTabela('Para descarte (vencidos há mais de 6 meses)', dados.lotesDescarte, COR_VERMELHO, (l) => [
+        l.codigoLote,
+        l.item.nome,
+        l.item.setor?.nome || '—',
+        `Saldo: ${l.quantidadeAtual} ${l.item.unidadeMedida} · Val: ${fmtData(l.dataValidade)}`,
+      ]);
+
+      desenharTabela('Em período adicional (vencidos há até 6 meses)', dados.lotesAdicional, COR_LARANJA, (l) => [
+        l.codigoLote,
+        l.item.nome,
+        l.item.setor?.nome || '—',
+        `Saldo: ${l.quantidadeAtual} ${l.item.unidadeMedida} · Val: ${fmtData(l.dataValidade)}`,
+      ]);
+
+      desenharTabela('Próximos ao vencimento (até 30 dias)', dados.lotesProximos, COR_LARANJA, (l) => [
+        l.codigoLote,
+        l.item.nome,
+        l.item.setor?.nome || '—',
+        `Saldo: ${l.quantidadeAtual} ${l.item.unidadeMedida} · Val: ${fmtData(l.dataValidade)}`,
+      ]);
+
+      desenharTabela('Itens abaixo do estoque mínimo', dados.abaixoMinimo, COR_VERMELHO, (i) => [
+        i.codigoInterno || '—',
+        i.nome,
+        i.setor?.nome || '—',
+        `Saldo: ${i.saldoAtual} ${i.unidadeMedida} · Mín: ${i.estoqueMinimo}`,
+      ]);
+    }
+
+    // Rodape
+    const yR = doc.page.height - doc.page.margins.bottom + 20;
+    doc.fontSize(7.5).fillColor('#8A9598').font('Helvetica')
+      .text(`Sistema de Almoxarifado · Associação Espírita Wantuil de Freitas · Emitido em ${fmtDataHora(new Date())}`,
+        doc.page.margins.left, yR, { width: totalW, align: 'center' });
+
+    doc.end();
+    return done;
   }
 
   // ═══════════ CRON: Verificação diária in-app (07h Cuiabá = 11h UTC) ═══════════
