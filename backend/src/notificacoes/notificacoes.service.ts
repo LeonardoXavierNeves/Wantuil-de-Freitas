@@ -187,30 +187,48 @@ export class NotificacoesService {
     }
     try {
       const dest = await this.destinatarios();
-      await this.enviarEmail(
+      const resultado = await this.enviarEmail(
         'Teste de notificação - Wantuil',
         `Olá!\n\nEste é um e-mail de teste do Sistema de Almoxarifado da Wantuil de Freitas.\n\nSe você está lendo esta mensagem, o envio de e-mails está funcionando corretamente.\n\nDestinatários cadastrados (${dest.emails.length}): ${dest.nomes.join(', ')}\n\nEnviado em: ${fmtDataHora(new Date())}`,
       );
+
+      // Sucesso total
+      if (resultado.falhas.length === 0) {
+        return {
+          sucesso: true,
+          mensagem: `E-mail enviado com sucesso para ${resultado.enviados}/${resultado.total} destinatário(s): ${resultado.sucessos.join(', ')}`,
+          detalhes: resultado,
+        };
+      }
+
+      // Sucesso parcial
+      const falhasDetalhe = resultado.falhas.map(f => `${f.email}: ${f.motivo}`).join(' | ');
       return {
-        sucesso: true,
-        mensagem: `E-mail enviado para ${dest.emails.length} usuário(s): ${dest.nomes.join(', ')}`,
+        sucesso: false, // marca como falha para chamar atencao do admin
+        parcial: true,
+        mensagem: `Entrega parcial: ${resultado.enviados}/${resultado.total} enviados. Sucesso: ${resultado.sucessos.join(', ')}. Falhas: ${falhasDetalhe}`,
+        motivo: falhasDetalhe,
+        detalhes: resultado,
+        diagnostico: diag,
       };
     } catch (e: any) {
-      // O Resend devolve detalhes em e.response.body / e.response.statusCode.
-      // Tenta extrair a mensagem mais util para diagnosticar.
-      const detalhe = e?.response?.body?.message
-        || e?.response?.body?.error
-        || (typeof e?.response?.body === 'string' ? e.response.body : null)
-        || e?.message
-        || 'Erro desconhecido';
-      const status = e?.response?.statusCode || e?.statusCode;
-      const motivo = status ? `${detalhe} (HTTP ${status})` : detalhe;
+      const motivo = e?.message || 'Erro desconhecido';
       this.logger.error(`Falha no testarEmail: ${motivo}`);
       return { sucesso: false, motivo, diagnostico: diag };
     }
   }
 
-  private async enviarEmail(assunto: string, corpo: string, anexos?: Anexo[]) {
+  /**
+   * Envia o email para todos os destinatarios ativos.
+   * Retorna detalhes de cada envio (sucesso/falha) em vez de jogar excecao em
+   * sucesso parcial. Lanca excecao apenas se *nenhum* email foi entregue.
+   */
+  private async enviarEmail(assunto: string, corpo: string, anexos?: Anexo[]): Promise<{
+    enviados: number;
+    total: number;
+    sucessos: string[];
+    falhas: { email: string; motivo: string }[];
+  }> {
     if (!this.resend) {
       this.logger.warn('RESEND_API_KEY nao configurada - email nao enviado');
       throw new Error('RESEND_API_KEY não configurada no servidor');
@@ -221,14 +239,14 @@ export class NotificacoesService {
     }
     const from = process.env.EMAIL_FROM || 'Almoxarifado <onboarding@resend.dev>';
 
-    // Resend exige attachments no formato { filename, content: base64 }
     const attachmentsResend = anexos?.map((a) => ({
       filename: a.filename,
       content: a.content.toString('base64'),
     }));
 
-    const erros: string[] = [];
-    let enviados = 0;
+    const sucessos: string[] = [];
+    const falhas: { email: string; motivo: string }[] = [];
+
     for (const email of dest.emails) {
       try {
         await this.resend.emails.send({
@@ -238,20 +256,28 @@ export class NotificacoesService {
           text: corpo,
           ...(attachmentsResend && attachmentsResend.length > 0 && { attachments: attachmentsResend }),
         });
-        enviados++;
+        sucessos.push(email);
       } catch (e: any) {
-        const det = e?.response?.body?.message || e?.message || 'erro desconhecido';
-        erros.push(`${email}: ${det}`);
-        this.logger.error(`Falha ao enviar para ${email}: ${det}`);
+        const det = e?.response?.body?.message
+          || e?.response?.body?.error
+          || (typeof e?.response?.body === 'string' ? e.response.body : null)
+          || e?.message
+          || 'erro desconhecido';
+        const status = e?.response?.statusCode || e?.statusCode;
+        const motivo = status ? `${det} (HTTP ${status})` : det;
+        falhas.push({ email, motivo });
+        this.logger.error(`Falha ao enviar para ${email}: ${motivo}`);
       }
     }
-    this.logger.log(`Email: ${enviados}/${dest.emails.length} enviados`);
-    if (enviados === 0) {
-      throw new Error(`Nenhum e-mail foi entregue. Detalhes: ${erros.join(' | ')}`);
+
+    this.logger.log(`Email: ${sucessos.length}/${dest.emails.length} enviados`);
+
+    if (sucessos.length === 0) {
+      const detalhes = falhas.map(f => `${f.email}: ${f.motivo}`).join(' | ');
+      throw new Error(`Nenhum e-mail foi entregue. Detalhes: ${detalhes}`);
     }
-    if (erros.length > 0) {
-      this.logger.warn(`Sucesso parcial: ${erros.length} falhas. ${erros.join(' | ')}`);
-    }
+
+    return { enviados: sucessos.length, total: dest.emails.length, sucessos, falhas };
   }
 
   // ═══════════ CRON: Resumo semanal (sábado 07h Cuiabá = 11h UTC) ═══════════
