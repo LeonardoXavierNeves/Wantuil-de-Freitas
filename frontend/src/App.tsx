@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Icon from './components/Icon';
 import Login from './pages/Login';
+import DefinirSenha from './pages/DefinirSenha';
 import Dashboard from './pages/Dashboard';
 import Itens from './pages/Itens';
 import Entradas from './pages/Entradas';
@@ -43,6 +44,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/definir-senha" element={<DefinirSenha />} />
         <Route path="/" element={<Privado><Layout /></Privado>}>
           <Route index element={<Dashboard />} />
           <Route path="itens" element={<Itens />} />

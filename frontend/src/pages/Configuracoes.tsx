@@ -318,11 +318,25 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
         const payload: any = { nome: form.nome, email: form.email, perfil: form.perfil, receberEmail: form.receberEmail };
         if (form.senha) payload.senha = form.senha;
         await api.patch(`/usuarios/${usuario.id}`, payload);
+        onSave();
       } else {
-        if (!form.senha || form.senha.length < 6) throw new Error('Senha precisa ter ao menos 6 caracteres');
-        await api.post('/usuarios', form);
+        // Senha agora e opcional na criacao. Se vazia, o backend envia convite por email.
+        if (form.senha && form.senha.length < 6) {
+          throw new Error('Se informar uma senha, ela precisa ter ao menos 6 caracteres');
+        }
+        const payload: any = { nome: form.nome, email: form.email, perfil: form.perfil, receberEmail: form.receberEmail };
+        if (form.senha) payload.senha = form.senha;
+        const { data } = await api.post('/usuarios', payload);
+        // Mostra resultado do convite (se foi enviado ou nao)
+        if (!form.senha) {
+          if (data.conviteEnviado?.enviado) {
+            alert(`Usuário criado! Um e-mail foi enviado para ${form.email} com o link para definir a senha (válido por 7 dias).`);
+          } else {
+            alert(`Usuário criado, mas houve falha ao enviar o convite por e-mail:\n\n${data.conviteEnviado?.motivo || 'erro desconhecido'}\n\nVocê pode pedir ao usuário para usar "Esqueci minha senha" na tela de login.`);
+          }
+        }
+        onSave();
       }
-      onSave();
     } catch (e: any) {
       setErro(e.response?.data?.message || e.message || 'Erro ao salvar');
     } finally { setSalvando(false); }
@@ -341,12 +355,18 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
         <label className="label">E-mail *</label>
         <input className="input" type="email" required value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })} style={{ marginBottom: 12 }} />
-        <label className="label">{usuario ? 'Nova senha (deixe vazio para manter)' : 'Senha *'}</label>
-        <div style={{ position: 'relative', marginBottom: 12 }}>
+        <label className="label">
+          {usuario
+            ? 'Nova senha (deixe vazio para manter)'
+            : 'Senha (opcional)'}
+        </label>
+        <div style={{ position: 'relative', marginBottom: usuario ? 12 : 4 }}>
           <input className="input" type={mostrarSenha ? 'text' : 'password'} minLength={6}
-            required={!usuario} value={form.senha}
+            value={form.senha}
             onChange={(e) => setForm({ ...form, senha: e.target.value })}
-            placeholder={usuario ? 'Deixe vazio para manter' : 'Mínimo 6 caracteres'}
+            placeholder={usuario
+              ? 'Deixe vazio para manter'
+              : 'Deixe vazio para enviar convite por e-mail'}
             style={{ paddingRight: 38 }} />
           <button type="button" onClick={() => setMostrarSenha(!mostrarSenha)}
             style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
@@ -354,6 +374,21 @@ function FormUsuario({ usuario, onClose, onSave }: any) {
             <Icon name={mostrarSenha ? 'eye-off' : 'eye'} size={14} />
           </button>
         </div>
+        {!usuario && !form.senha && (
+          <div style={{
+            fontSize: 11, color: 'var(--primary-dk)', marginBottom: 12,
+            padding: '8px 10px', borderRadius: 6, background: 'var(--primary-bg)',
+            display: 'flex', alignItems: 'flex-start', gap: 6, lineHeight: 1.5,
+          }}>
+            <Icon name="mail" size={12} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span>O usuário receberá um e-mail com link para definir a própria senha (válido por 7 dias).</span>
+          </div>
+        )}
+        {!usuario && form.senha && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12 }}>
+            Você está definindo uma senha agora. Nenhum e-mail será enviado.
+          </div>
+        )}
         <label className="label">Perfil</label>
         <select className="select" value={form.perfil}
           disabled={editandoMaster && !podeCriarMaster}

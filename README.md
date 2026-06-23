@@ -1,52 +1,91 @@
-# Sistema de Gestão de Almoxarifado
-## Instituição de Caridade Wantuil de Freitas — Cuiabá/MT
+# Sistema de Almoxarifado
+## Associação Espírita Wantuil de Freitas — Cuiabá/MT
 
-Sistema completo para gestão de almoxarifado de instituições de caridade, com controle de doações, distribuição, validade de produtos, alertas semanais por e-mail e impressão de etiquetas com código de barras.
+Sistema completo de gestão de almoxarifado para instituições de caridade. Controla doações, distribuição, lotes com validade, eventos, reservas, alertas semanais por e-mail e impressão de etiquetas com código de barras.
+
+Desenvolvido sob medida pela **SYNCT Labs**.
 
 ---
 
 ## Funcionalidades
 
-- **Dashboard** com indicadores em tempo real e alertas críticos
+### Operação diária
+- **Dashboard** com alertas críticos, movimentações recentes e saldo geral
 - **Cadastro de itens** com leitura de código de barras (EAN) via câmera ou scanner USB
-- **Integração com Open Food Facts** — produtos industrializados são reconhecidos automaticamente
-- **Entradas (doações)** com vínculo ao doador e geração de etiquetas
-- **Saídas (distribuição)** para beneficiários ou setores internos, com confirmação obrigatória quando o saldo fica abaixo do mínimo
-- **Controle de validade** com 5 estados (Vigente → Próximo → Vencido → Período Adicional → Descarte)
-- **Notificações automáticas** todo sábado às 08h00 + alertas imediatos por e-mail (via Resend)
-- **Etiquetas 50×25mm** em PDF com nome, datas de entrada e validade, e código de barras Code128
-- **Cadastro de doadores** (PF/PJ) com validação real de CPF/CNPJ
-- **Cadastro de beneficiários** com ativação/inativação
-- **Setores internos** (Cozinha, Enfermaria, Abrigo, etc.)
-- **Relatórios** com exportação para Excel
-- **Controle de perfis** (Admin, Almoxarife, Gestor, Operador) com JWT
-- **Log de auditoria** completo
+- **Cascata de APIs externas** para enriquecimento automático (Open Food Facts, Bluesoft Cosmos, etc.)
+- **Entradas (doações)** com vínculo opcional ao doador, geração de etiqueta Code128 e criação de lote único
+- **Saídas (distribuição)** por leitura de etiqueta **ou cadastro manual** com dropdown de lotes ordenados por validade mais próxima (FEFO)
+- **Descarte registrado** com motivo, separado das saídas operacionais
+
+### Controle e auditoria
+- **Modelo de lotes** — cada entrada gera um lote único (código `L-AAAAMMDD-NNNN`) com sua própria validade. Saídas referenciam o lote específico, não só o item
+- **Controle de validade em 4 estados**: Vigente → Próximo (≤30 dias) → Adicional (vencido até 6m) → Descarte (vencido +6m)
+- **Estoque mínimo configurável** por item; saídas que cruzam o mínimo exigem confirmação
+- **Eventos** com reservas que bloqueiam saldo do lote; sobras voltam ao estoque ao finalizar
+- **Log de auditoria** técnico (acessível apenas pelo perfil MASTER)
+
+### Notificações e relatórios
+- **Resumo semanal automático** todo sábado 7h Cuiabá: e-mail com **PDF anexo** detalhando próximos do vencimento, em período adicional, descarte e abaixo do mínimo
+- **Verificação diária** das notificações no sino (in-app)
+- **Relatórios** com filtros por período e setor, exportáveis em PDF e Excel:
+  - Posição atual do estoque
+  - Movimentações por período
+  - Resumo executivo
+  - Doações por doador
+  - Itens mais movimentados
+  - Auditoria (MASTER)
+
+### Estrutura e segurança
+- **5 perfis de acesso** com matriz de permissões granular:
+  - **MASTER** — dono do sistema (dev). Acesso total + logs + diagnóstico
+  - **ADMIN** — diretoria. Gestão completa exceto ferramentas técnicas
+  - **ALMOXARIFE** — operação principal (entradas, saídas, eventos)
+  - **GESTOR** — somente leitura + relatórios
+  - **OPERADOR** — apenas saídas (voluntário de evento)
+- **Autenticação JWT** com bcrypt
+- **HTTPS** via Let's Encrypt (renovação automática)
+- **Backup diário** automatizado do banco de dados
 
 ---
 
-## Stack Técnica
+## Stack técnica
 
 | Camada | Tecnologia |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite + React Router |
+| Frontend | React 18 + TypeScript + Vite |
 | Backend | NestJS 10 + TypeScript |
-| Banco | PostgreSQL (Supabase) |
+| Banco | PostgreSQL 16 |
 | ORM | Prisma |
 | Autenticação | JWT + bcrypt |
-| Códigos de barras | @zxing/browser (leitura) + Code128 nativo (geração) |
-| Etiquetas PDF | PDFKit |
+| Códigos de barras | `@zxing/browser` (leitura por câmera) + Code128 nativo (geração) |
+| PDFs | PDFKit |
 | Excel | ExcelJS |
-| E-mails | Resend (3.000/mês grátis) |
-| Cron Jobs | @nestjs/schedule |
+| E-mails | Resend |
+| Cron Jobs | `@nestjs/schedule` |
+| Process manager | PM2 |
+| Web server | Nginx |
 
 ---
 
-## Instalação (Desenvolvimento)
+## Arquitetura de produção
+
+Atualmente roda em VPS própria gerenciada pela SYNCT Labs:
+
+- **Servidor**: Hostinger KVM (Ubuntu 24.04 LTS)
+- **Domínio**: `syncontrol.cloud` (HTTPS via Let's Encrypt)
+- **Backend** servido por PM2 (process: `wantuil-api`, porta 3000)
+- **Frontend** servido como estático pelo Nginx
+- **Banco** PostgreSQL 16 local
+- **Backup** diário em `/var/backups/wantuil`, retenção de 14 dias
+- **Capacidade estimada**: ~3 milhões de produtos/ano nos 32 GB úteis
+
+---
+
+## Instalação em desenvolvimento
 
 ### Pré-requisitos
 - Node.js 20+
-- Conta gratuita no [Supabase](https://supabase.com)
-- Conta gratuita no [Resend](https://resend.com) (opcional, para e-mails)
+- PostgreSQL 14+ rodando localmente
 
 ### 1. Backend
 
@@ -54,7 +93,7 @@ Sistema completo para gestão de almoxarifado de instituições de caridade, com
 cd backend
 npm install
 cp .env.example .env
-# Edite o .env com suas credenciais do Supabase
+# Edite o .env: DATABASE_URL, JWT_SECRET, RESEND_API_KEY, EMAIL_FROM
 npx prisma migrate deploy
 npx prisma db seed
 npm run start:dev
@@ -67,7 +106,6 @@ A API estará em `http://localhost:3000/api`.
 ```bash
 cd frontend
 npm install
-cp .env.example .env
 npm run dev
 ```
 
@@ -75,23 +113,14 @@ O sistema estará em `http://localhost:5173`.
 
 ### 3. Acesso inicial
 
-- **E-mail:** admin@wantuil.org.br
-- **Senha:** admin123
+- **E-mail:** `admin@wantuil.org.br`
+- **Senha:** `admin123`
 
-Troque a senha imediatamente em Configurações.
+Troque a senha imediatamente. Para promover o usuário a MASTER (uso exclusivo do desenvolvedor):
 
----
-
-## Deploy em produção (infraestrutura gratuita)
-
-| Serviço | Para que serve | Plano free |
-|---|---|---|
-| **Vercel** | Frontend React | Ilimitado |
-| **Render** | Backend NestJS | 750h/mês |
-| **Supabase** | Banco PostgreSQL | 500MB |
-| **Resend** | E-mails | 3.000/mês |
-
-Veja `docs/DEPLOY.md` para instruções passo a passo.
+```sql
+UPDATE "Usuario" SET perfil = 'MASTER' WHERE email = 'seu@email.com';
+```
 
 ---
 
@@ -99,56 +128,75 @@ Veja `docs/DEPLOY.md` para instruções passo a passo.
 
 ```
 .
-├── backend/                  # API NestJS
+├── backend/                       # API NestJS
 │   ├── prisma/
-│   │   ├── schema.prisma     # Modelo de dados
-│   │   └── seed.ts           # Dados iniciais
+│   │   ├── schema.prisma          # Modelo de dados (com enum Perfil de 5 níveis)
+│   │   └── seed.ts                # Dados iniciais
 │   └── src/
-│       ├── auth/             # Login + JWT
-│       ├── users/            # Usuários do sistema
-│       ├── itens/            # CRUD de itens + status de validade
+│       ├── auth/                  # Login + JWT + Guards (Jwt, Perfil)
+│       ├── users/                 # Usuários com validação de perfil MASTER
+│       ├── itens/                 # CRUD de itens
+│       ├── lotes/                 # Gestão de lotes com validade
 │       ├── categorias/
 │       ├── setores/
-│       ├── doadores/         # Com validação CPF/CNPJ
-│       ├── beneficiarios/
-│       ├── movimentacoes/    # Entradas, saídas, descarte, estorno
-│       ├── etiquetas/        # Geração de PDF 50x25mm
-│       ├── relatorios/       # Exportação Excel
-│       └── notificacoes/     # Cron semanal + alertas
-├── frontend/                 # SPA React + Vite
+│       ├── doadores/              # Com validação CPF/CNPJ
+│       ├── beneficiarios/         # Modelo preservado (UI oculta — cliente não usa)
+│       ├── eventos/               # Eventos com reservas
+│       ├── movimentacoes/         # Entrada, saída, descarte, estorno
+│       ├── etiquetas/             # Geração de PDF 50x25mm com Code128
+│       ├── relatorios/            # PDFs e exportações Excel
+│       ├── notificacoes/          # Cron semanal + PDF anexo do resumo
+│       ├── sistema/               # Endpoints administrativos (MASTER)
+│       └── common/                # Helpers: data-fuso (America/Cuiaba)
+├── frontend/                      # SPA React + Vite
 │   └── src/
-│       ├── api/              # Cliente axios com JWT
-│       ├── components/       # Layout, Scanner
-│       ├── context/          # AuthContext
-│       ├── pages/            # Telas
+│       ├── api/                   # Cliente axios com JWT
+│       ├── components/            # Layout, ScannerLote, AdicionarLoteManual, Toast, NotificacoesBell
+│       ├── context/               # AuthContext + matriz de permissões
+│       ├── pages/                 # Telas
 │       └── utils/
-└── docs/                     # Documentação
+├── scripts/                       # Scripts de deploy e backup
+└── docs/                          # Documentação técnica
 ```
 
 ---
 
 ## Regras de Negócio Implementadas
 
-1. **RN-01:** Saldo nunca pode ser negativo
-2. **RN-02:** Saída abaixo do mínimo exige confirmação explícita do usuário
-3. **RN-03:** Movimentações não são excluídas — apenas estornadas (gera novo registro)
-4. **RN-04:** Cada item recebe código interno único (WF-XXXXX) ou usa EAN se disponível
-5. **RN-05:** EAN desconhecido abre formulário de cadastro manual pré-preenchido
-6. **RN-06:** Etiqueta gerada após entrada com nome, datas e código de barras
-7. **RN-07:** Janela de alerta de validade começa 30 dias antes
-8. **RN-08:** Após vencimento, item entra em Período Adicional de 6 meses
-9. **RN-09:** Após 6 meses do vencimento, item entra em estado Descarte
-10. **RN-10:** CPF/CNPJ duplicado é bloqueado no cadastro
-11. **RN-11:** Beneficiário inativo não pode receber itens
-12. **RN-12:** Resumo semanal vai todo sábado 08h00 (Brasília)
-13. **RN-13:** Itens sem validade não participam do controle de vencimento
+1. **RN-01** — Saldo do lote nunca pode ser negativo
+2. **RN-02** — Saída que cruza o estoque mínimo exige confirmação explícita
+3. **RN-03** — Movimentações não são excluídas — apenas estornadas (gera novo registro)
+4. **RN-04** — Cada item recebe código interno único (`WF-XXXXX`) ou usa EAN se disponível
+5. **RN-05** — EAN desconhecido abre formulário de cadastro pré-preenchido
+6. **RN-06** — Cada entrada gera um lote `L-AAAAMMDD-NNNN` com etiqueta única
+7. **RN-07** — Janela de "Próximo ao vencimento" começa 30 dias antes da validade
+8. **RN-08** — Após vencimento, lote entra em "Período Adicional" por 6 meses
+9. **RN-09** — Após 6 meses do vencimento, lote entra em "Descarte"
+10. **RN-10** — CPF/CNPJ duplicado é bloqueado no cadastro
+11. **RN-11** — Reserva em evento bloqueia saldo do lote até finalização
+12. **RN-12** — Resumo semanal enviado sábado 7h Cuiabá (UTC-4) com PDF anexo
+13. **RN-13** — Lotes sem data de validade ficam fora do controle de vencimento
+14. **RN-14** — Apenas usuários MASTER podem criar, editar ou excluir contas MASTER
+15. **RN-15** — Categorias e setores em uso são preservados em operações de limpeza
+
+---
+
+## Versão
+
+**v2.8.4** — Junho de 2026
+
+### Principais marcos
+- v2.6 — Modelo de lotes (substitui saldo simples por lote individual)
+- v2.7 — Módulo de eventos com reservas
+- v2.7.4 — Beneficiários ocultos a pedido do cliente
+- v2.7.10 — Resumo semanal com PDF anexo
+- v2.8.0 — Roles segmentadas em 5 níveis com perfil MASTER
+- v2.8.1 — Saída manual com dropdown FEFO
 
 ---
 
 ## Suporte
 
-Este sistema foi desenvolvido para a Instituição de Caridade Wantuil de Freitas em Cuiabá/MT.
-Para customizações ou suporte, entre em contato.
+Desenvolvido pela **SYNCT Labs** para a Associação Espírita Wantuil de Freitas.
 
-**Versão:** 1.0  
-**Data:** Junho de 2026
+Para customizações, correções ou suporte, entre em contato com a SYNCT Labs.

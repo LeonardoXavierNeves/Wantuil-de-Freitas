@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../api/client';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
 
@@ -12,6 +13,8 @@ export default function Login() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [erro, setErro] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetEnviando, setResetEnviando] = useState(false);
+  const [mensagemReset, setMensagemReset] = useState('');
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -23,6 +26,23 @@ export default function Login() {
       setErro(e.response?.data?.message || 'E-mail ou senha incorretos');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function solicitarReset() {
+    const dest = (email || '').trim();
+    if (!dest) {
+      setErro('Digite seu e-mail acima para receber o link de redefinição');
+      return;
+    }
+    setErro(''); setMensagemReset(''); setResetEnviando(true);
+    try {
+      const { data } = await api.post('/auth/solicitar-reset', { email: dest });
+      setMensagemReset(data.mensagem);
+    } catch (e: any) {
+      setErro(e.response?.data?.message || 'Erro ao solicitar redefinição');
+    } finally {
+      setResetEnviando(false);
     }
   }
 
@@ -93,6 +113,24 @@ export default function Login() {
           style={{ width: '100%', justifyContent: 'center', padding: '10px', fontSize: 14 }}>
           {loading ? <><span className="spinner" /> Entrando...</> : 'Entrar'}
         </button>
+
+        <div style={{ marginTop: 12, textAlign: 'center' }}>
+          <button type="button" onClick={solicitarReset} disabled={resetEnviando}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--primary-dk)', fontSize: 12, textDecoration: 'underline',
+            }}>
+            Esqueci minha senha
+          </button>
+        </div>
+
+        {mensagemReset && (
+          <div style={{
+            marginTop: 10, padding: 10, borderRadius: 6,
+            background: 'var(--green-bg)', color: 'var(--green)',
+            fontSize: 11, textAlign: 'center', lineHeight: 1.4,
+          }}>{mensagemReset}</div>
+        )}
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)',
           fontSize: 11, color: 'var(--text-3)', textAlign: 'center' }}>
