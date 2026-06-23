@@ -149,6 +149,8 @@ export function gerarRelatorioPdf(opts: RelatorioPdfOpts): Promise<Buffer> {
             .text(String(kpi.valor), x + 10, yResumo + 20, { width: cardLargura - 20 });
         });
         doc.y = yResumo + 50;
+        // Reseta cursor X (KPIs deixam o cursor preso na largura do ultimo card).
+        doc.x = doc.page.margins.left;
         doc.moveDown(0.5);
       }
 

@@ -428,6 +428,11 @@ export class NotificacoesService {
         .text(String(k.val), x + 8, yKpi + 24, { width: wKpi - 16 });
     });
     doc.y = yKpi + 70;
+    // Reseta cursor X para a margem esquerda. Apos desenhar os KPIs (que usam
+    // width limitado de cada card), o PDFKit mantem doc.x e a largura "presa"
+    // no ultimo KPI a direita, fazendo titulos de secao subsequentes
+    // quebrarem em uma coluna estreita no canto direito.
+    doc.x = doc.page.margins.left;
 
     // ─── Caso sem alertas ─────────────────────────────────────────
     if (dados.totalAlertas === 0) {
@@ -442,7 +447,9 @@ export class NotificacoesService {
       const desenharTabela = (titulo: string, items: any[], cor: string, montaLinha: (i: any) => string[]) => {
         if (items.length === 0) return;
         if (doc.y > doc.page.height - 120) doc.addPage();
-        doc.fillColor(cor).fontSize(11).font('Helvetica-Bold').text(titulo.toUpperCase());
+        doc.x = doc.page.margins.left;
+        doc.fillColor(cor).fontSize(11).font('Helvetica-Bold')
+          .text(titulo.toUpperCase(), { width: totalW, align: 'left', lineBreak: false });
         doc.moveDown(0.3);
 
         // Header
