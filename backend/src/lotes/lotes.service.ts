@@ -53,10 +53,18 @@ export class LotesService {
   constructor(private prisma: PrismaService) {}
 
   // ─── Consultas ───────────────────────────────────────────────
-  async findAll(filtros: { itemId?: string; ativo?: boolean; busca?: string }) {
+  async findAll(filtros: { itemId?: string; ativo?: boolean; busca?: string; incluirItensInativos?: boolean }) {
     const where: any = {};
     if (filtros.ativo !== undefined) where.ativo = filtros.ativo;
     if (filtros.itemId) where.itemId = filtros.itemId;
+
+    // Por padrao, oculta lotes cujo item esteja desativado (item fora de
+    // circulacao por decisao do admin). Backoffice pode pedir explicitamente
+    // com incluirItensInativos=true.
+    if (!filtros.incluirItensInativos) {
+      where.item = { ativo: true };
+    }
+
     if (filtros.busca) {
       where.OR = [
         { codigoLote: { contains: filtros.busca, mode: 'insensitive' } },

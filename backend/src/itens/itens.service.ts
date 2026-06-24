@@ -231,9 +231,15 @@ export class ItensService {
    * sua propria validade); estoque minimo continua sendo por ITEM (agregado).
    */
   async alertas() {
-    // 1. Validade: olha cada LOTE ativo
+    // 1. Validade: olha cada LOTE ativo cujo ITEM tambem esteja ativo.
+    //    Item desativado sai do dashboard mesmo que ainda tenha lote com saldo,
+    //    pois ele esta fora de circulacao por decisao do admin.
     const lotes = await this.prisma.lote.findMany({
-      where: { ativo: true, quantidadeAtual: { gt: 0 } },
+      where: {
+        ativo: true,
+        quantidadeAtual: { gt: 0 },
+        item: { ativo: true },
+      },
       include: { item: { include: { setor: true } } },
     });
     const lotesComStatus = lotes.map((l) => ({
@@ -241,7 +247,7 @@ export class ItensService {
       statusValidade: calcularStatusValidade(l.dataValidade),
     }));
 
-    // 2. Estoque minimo: agrega por ITEM (saldoAtual e a soma dos lotes)
+    // 2. Estoque minimo: agrega por ITEM. Ja filtra ativo: true.
     const itens = await this.prisma.item.findMany({
       where: { ativo: true, estoqueMinimo: { gt: 0 } },
       include: { setor: true },

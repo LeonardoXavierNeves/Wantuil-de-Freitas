@@ -285,9 +285,10 @@ export class NotificacoesService {
   async resumoSemanal() {
     this.logger.log('Cron: gerando resumo semanal...');
 
-    // Levantamento: usa lotes para validade e itens para abaixo do minimo
+    // Levantamento: usa lotes para validade e itens para abaixo do minimo.
+    // Itens desativados sao excluidos do resumo (estao fora de circulacao).
     const lotes = await this.prisma.lote.findMany({
-      where: { ativo: true },
+      where: { ativo: true, item: { ativo: true } },
       include: { item: { include: { setor: true, categoria: true } } },
     });
     const lotesProximos = lotes.filter((l) => calcularStatusLote(l.dataValidade) === 'PROXIMO');
