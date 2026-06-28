@@ -23,6 +23,22 @@ export default function Validade() {
     }
   }
 
+  function reimprimirEtiqueta(loteId: string, codigoLote: string) {
+    const resp = window.prompt(`Reimprimir etiqueta do lote ${codigoLote}.\n\nQuantas cópias?`, '1');
+    if (resp === null) return;
+    const qtd = Math.max(1, Math.min(100, parseInt(resp) || 1));
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/etiquetas/lote/${loteId}?qtd=${qtd}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error('Falha ao gerar etiqueta');
+        return r.blob();
+      })
+      .then((b) => window.open(URL.createObjectURL(b), '_blank'))
+      .catch((e) => toast.erro('Erro', e.message || 'Falha ao reimprimir'));
+  }
+
   if (!dados) return <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>;
 
   const cards = [
@@ -78,7 +94,11 @@ export default function Validade() {
                     <td data-label="Item"><strong>{l.item.nome}</strong></td>
                     <td data-label="Saldo">{l.quantidadeAtual} {l.item.unidadeMedida}</td>
                     <td data-label="Validade">{fmtData(l.dataValidade)}</td>
-                    <td data-label="Ação">
+                    <td data-label="Ação" data-actions>
+                      <button className="btn icon sm ghost" title="Reimprimir etiqueta"
+                        onClick={() => reimprimirEtiqueta(l.id, l.codigoLote)}>
+                        <Icon name="printer" size={14} />
+                      </button>
                       {g.permiteDescarte && (
                         <button className="btn danger sm"
                           onClick={() => registrarDescarte(l.id, l.codigoLote, l.item.nome, Number(l.quantidadeAtual))}>

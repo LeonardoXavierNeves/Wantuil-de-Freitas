@@ -50,6 +50,23 @@ export default function Itens() {
     setLotesItem(item);
   }
 
+  function reimprimirEtiqueta(loteId: string, codigoLote: string) {
+    const padrao = '1';
+    const resp = window.prompt(`Reimprimir etiqueta do lote ${codigoLote}.\n\nQuantas cópias?`, padrao);
+    if (resp === null) return; // cancelou
+    const qtd = Math.max(1, Math.min(100, parseInt(resp) || 1));
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/etiquetas/lote/${loteId}?qtd=${qtd}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error('Falha ao gerar etiqueta');
+        return r.blob();
+      })
+      .then((b) => window.open(URL.createObjectURL(b), '_blank'))
+      .catch((e) => alert(e.message || 'Erro ao reimprimir etiqueta'));
+  }
+
   async function excluir(item: any) {
     const ok = await excluirComConfirmacao({
       url: `/itens/${item.id}`,
@@ -190,7 +207,7 @@ export default function Itens() {
             ) : (
               <div className="table-responsive">
                 <table className="table">
-                  <thead><tr><th>Código do lote</th><th>Entrada</th><th>Validade</th><th>Saldo</th><th>Doador</th></tr></thead>
+                  <thead><tr><th>Código do lote</th><th>Entrada</th><th>Validade</th><th>Saldo</th><th>Doador</th><th></th></tr></thead>
                   <tbody>
                     {lotesData.map((l) => (
                       <tr key={l.id}>
@@ -199,6 +216,12 @@ export default function Itens() {
                         <td data-label="Validade" style={{ fontSize: 12 }}>{l.dataValidade ? fmtData(l.dataValidade) : '—'}</td>
                         <td data-label="Saldo"><strong>{l.quantidadeAtual}</strong> {lotesItem.unidadeMedida}</td>
                         <td data-label="Doador" style={{ fontSize: 12, color: 'var(--text-2)' }}>{l.doador?.nome || '—'}</td>
+                        <td data-label="Etiqueta" data-actions>
+                          <button className="btn icon sm ghost" title="Reimprimir etiqueta"
+                            onClick={() => reimprimirEtiqueta(l.id, l.codigoLote)}>
+                            <Icon name="printer" size={14} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
