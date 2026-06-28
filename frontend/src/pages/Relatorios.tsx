@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import Icon, { IconName } from '../components/Icon';
+import InputData from '../components/InputData';
 
 interface RelatorioCard {
   id: string;
@@ -139,13 +140,11 @@ export default function Relatorios() {
         <div className="grid-3">
           <div>
             <label className="label">Data inicial</label>
-            <input className="input" type="date" value={dataInicio}
-              onChange={(e) => setDataInicio(e.target.value)} />
+            <InputData value={dataInicio} onChange={setDataInicio} />
           </div>
           <div>
             <label className="label">Data final</label>
-            <input className="input" type="date" value={dataFim}
-              onChange={(e) => setDataFim(e.target.value)} />
+            <InputData value={dataFim} onChange={setDataFim} />
           </div>
           <div>
             <label className="label">Setor (opcional)</label>

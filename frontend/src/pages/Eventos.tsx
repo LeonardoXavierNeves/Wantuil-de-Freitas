@@ -182,13 +182,13 @@ function FormEvento({ evento, onClose, onSave }: any) {
         <div className="grid-2" style={{ marginBottom: 12 }}>
           <div>
             <label className="label">Data início *</label>
-            <input className="input" type="date" required value={form.dataInicio}
-              onChange={(e) => setForm({ ...form, dataInicio: e.target.value })} />
+            <InputData required value={form.dataInicio}
+              onChange={(iso) => setForm({ ...form, dataInicio: iso })} />
           </div>
           <div>
             <label className="label">Data fim (opcional)</label>
-            <input className="input" type="date" value={form.dataFim}
-              onChange={(e) => setForm({ ...form, dataFim: e.target.value })} />
+            <InputData value={form.dataFim}
+              onChange={(iso) => setForm({ ...form, dataFim: iso })} />
           </div>
         </div>
 

@@ -67,6 +67,25 @@ export default function Itens() {
       .catch((e) => alert(e.message || 'Erro ao reimprimir etiqueta'));
   }
 
+  async function excluirLote(loteId: string, codigoLote: string, saldo: number) {
+    if (saldo > 0) {
+      alert(`Lote ${codigoLote} ainda tem saldo (${saldo} un). Apenas lotes esvaziados podem ser excluídos.`);
+      return;
+    }
+    if (!confirm(`Excluir lote ${codigoLote}?\n\nSe o lote tiver histórico de movimentações, será desativado (preserva auditoria).`)) return;
+    try {
+      const { data } = await api.delete(`/lotes/${loteId}`);
+      alert(data.mensagem || 'Lote excluído');
+      // Recarrega lotes do item
+      if (lotesItem) {
+        const r = await api.get(`/lotes?itemId=${lotesItem.id}`);
+        setLotesData(r.data);
+      }
+    } catch (e: any) {
+      alert(e.response?.data?.message || 'Erro ao excluir lote');
+    }
+  }
+
   async function excluir(item: any) {
     const ok = await excluirComConfirmacao({
       url: `/itens/${item.id}`,
@@ -221,6 +240,10 @@ export default function Itens() {
                             onClick={() => reimprimirEtiqueta(l.id, l.codigoLote)}>
                             <Icon name="printer" size={14} />
                           </button>
+                          <button className="btn icon sm ghost" title="Excluir lote"
+                            onClick={() => excluirLote(l.id, l.codigoLote, Number(l.quantidadeAtual))}>
+                            <Icon name="trash" size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -248,14 +271,19 @@ export function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, cat
     estoqueMinimo: item?.estoqueMinimo || 0,
     categoriaId: categoriaIdInicial,
     setorId: item?.setorId || '',
+    produtoBaseId: item?.produtoBaseId || '',
   });
+  const [produtosBase, setProdutosBase] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    api.get('/produtos-base').then((r) => setProdutosBase(r.data.filter((p: any) => p.ativo))).catch(() => {});
+  }, []);
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault(); setErro(''); setSalvando(true);
     try {
-      // Monta payload limpo: unidade fixa em 'un' (padrao), sem localizacao no form
       const payload = {
         codigoEan: form.codigoEan?.trim() || undefined,
         nome: form.nome.trim(),
@@ -264,6 +292,7 @@ export function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, cat
         estoqueMinimo: Number(form.estoqueMinimo) || 0,
         categoriaId: form.categoriaId,
         setorId: form.setorId || undefined,
+        produtoBaseId: form.produtoBaseId || null,
       };
 
       if (item) await api.patch(`/itens/${item.id}`, payload);
@@ -313,12 +342,29 @@ export function FormItem({ item, eanInicial, nomeInicial, categoriaSugerida, cat
           {categorias.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
 
-        <label className="label">Estoque mínimo</label>
+        <label className="label">Produto base (agrupa marcas)</label>
+        <select className="select" value={form.produtoBaseId}
+          onChange={(e) => setForm({ ...form, produtoBaseId: e.target.value })}
+          style={{ marginBottom: 4 }}>
+          <option value="">— Nenhum (item isolado) —</option>
+          {produtosBase.map((p: any) => (
+            <option key={p.id} value={p.id}>{p.nome} (mín: {p.estoqueMinimo})</option>
+          ))}
+        </select>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 14, marginTop: 4, lineHeight: 1.4 }}>
+          Vincule a um produto base para que o alerta de estoque mínimo agregue saldos de todas as marcas.
+          Cadastre produtos base em <strong>Configurações → Produtos Base</strong>.
+        </div>
+
+        <label className="label">Estoque mínimo {form.produtoBaseId && <span style={{ fontWeight: 400, color: 'var(--text-3)', fontSize: 11 }}>(ignorado — usa o do produto base)</span>}</label>
         <input className="input" type="number" min="0" value={form.estoqueMinimo}
           onChange={(e) => setForm({ ...form, estoqueMinimo: parseFloat(e.target.value) || 0 })}
+          disabled={!!form.produtoBaseId}
           placeholder="0" />
         <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 14, marginTop: 4, lineHeight: 1.4 }}>
-          Dispara alerta quando o saldo cai a esse valor. Deixe 0 se não quiser alerta.
+          {form.produtoBaseId
+            ? 'Vinculado a um produto base — o alerta usa o mínimo definido lá.'
+            : 'Dispara alerta quando o saldo cai a esse valor. Deixe 0 se não quiser alerta.'}
         </div>
 
         <label className="label">Descrição</label>

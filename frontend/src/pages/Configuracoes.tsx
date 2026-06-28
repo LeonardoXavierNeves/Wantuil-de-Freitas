@@ -9,7 +9,7 @@ const PERFIS = ['MASTER', 'ADMIN', 'ALMOXARIFE', 'GESTOR', 'OPERADOR'];
 export default function Configuracoes() {
   const { podeFazer } = useAuth();
   const podeSistema = podeFazer('config.sistema');
-  const [tab, setTab] = useState<'usuarios' | 'categorias' | 'notificacoes' | 'sistema'>('usuarios');
+  const [tab, setTab] = useState<'usuarios' | 'categorias' | 'produtos-base' | 'notificacoes' | 'sistema'>('usuarios');
 
   if (!podeFazer('config.geral')) {
     return (
@@ -26,6 +26,7 @@ export default function Configuracoes() {
   const abas = [
     { id: 'usuarios', label: 'Usuários', icon: 'users' as const, visivel: true },
     { id: 'categorias', label: 'Categorias', icon: 'tag' as const, visivel: true },
+    { id: 'produtos-base', label: 'Produtos Base', icon: 'package' as const, visivel: true },
     { id: 'notificacoes', label: 'Notificações', icon: 'bell' as const, visivel: true },
     { id: 'sistema', label: 'Sistema', icon: 'settings' as const, visivel: podeSistema },
   ].filter(t => t.visivel);
@@ -52,6 +53,7 @@ export default function Configuracoes() {
 
       {tab === 'usuarios' && <Usuarios />}
       {tab === 'categorias' && <Categorias />}
+      {tab === 'produtos-base' && <ProdutosBase />}
       {tab === 'notificacoes' && <Notificacoes />}
       {tab === 'sistema' && podeSistema && <Sistema />}
     </div>
@@ -674,6 +676,171 @@ function Notificacoes() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Aba: Produtos Base
+// Agrega marcas/variacoes do mesmo produto (ex: "Arroz 5kg" agrupa Tio
+// Joao + Camil). Estoque minimo passa a ser definido aqui, nao no item.
+// ═══════════════════════════════════════════════════════════════════════
+function ProdutosBase() {
+  const [lista, setLista] = useState<any[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState<any>(null);
+  const [busca, setBusca] = useState('');
+
+  function carregar() {
+    api.get('/produtos-base', { params: { busca } }).then((r) => setLista(r.data));
+  }
+  useEffect(carregar, [busca]);
+
+  async function excluir(pb: any) {
+    if (!confirm(`Excluir "${pb.nome}"?\n\nSe houver itens vinculados, sera desativado em vez de excluido.`)) return;
+    try {
+      await api.delete(`/produtos-base/${pb.id}`);
+      carregar();
+    } catch (e: any) {
+      alert(e.response?.data?.message || 'Erro ao excluir');
+    }
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Icon name="package" size={16} color="var(--primary-dk)" />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Produtos Base</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>· agregam várias marcas do mesmo produto</span>
+        </div>
+
+        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 14,
+          padding: 10, borderRadius: 6, background: 'var(--primary-bg)' }}>
+          Um <strong>produto base</strong> agrupa itens de marcas diferentes (ex: o produto base
+          "Arroz 5kg" agrupa "Arroz Tio João 5kg" e "Arroz Camil 5kg"). O <strong>estoque mínimo</strong> é
+          definido aqui e os alertas comparam a soma de saldos de todas as marcas.
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <input className="input" placeholder="Buscar produto base..." style={{ flex: '1 1 200px' }}
+            value={busca} onChange={(e) => setBusca(e.target.value)} />
+          <button className="btn primary" onClick={() => { setEditando(null); setShowForm(true); }}>
+            <Icon name="plus" size={14} /> Novo produto base
+          </button>
+        </div>
+
+        {lista.length === 0 ? (
+          <div className="empty-state">
+            <Icon name="package" size={28} color="var(--text-3)" style={{ margin: '0 auto 8px' }} />
+            <div className="empty-state-title">Nenhum produto base cadastrado</div>
+            <div style={{ fontSize: 11 }}>Cadastre produtos base para agrupar marcas em alertas e relatórios.</div>
+          </div>
+        ) : (
+          <div className="table-responsive">
+            <table className="table">
+              <thead><tr>
+                <th>Nome</th><th>Unidade</th><th>Estoque mínimo</th><th>Saldo total</th><th>Marcas</th><th></th>
+              </tr></thead>
+              <tbody>
+                {lista.map((pb) => {
+                  const baixo = pb.estoqueMinimo > 0 && pb.saldoTotal <= Number(pb.estoqueMinimo);
+                  return (
+                    <tr key={pb.id}>
+                      <td data-label="Nome"><strong>{pb.nome}</strong>{!pb.ativo && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-3)' }}>(inativo)</span>}</td>
+                      <td data-label="Unidade" style={{ fontSize: 12 }}>{pb.unidadeMedida}</td>
+                      <td data-label="Mínimo">{pb.estoqueMinimo}</td>
+                      <td data-label="Saldo">
+                        <span style={{ color: baixo ? 'var(--r-600)' : 'inherit', fontWeight: baixo ? 600 : 400 }}>
+                          {pb.saldoTotal}
+                        </span>
+                      </td>
+                      <td data-label="Marcas" style={{ fontSize: 12, color: 'var(--text-2)' }}>{pb.qtdMarcas}</td>
+                      <td data-actions>
+                        <button className="btn icon sm ghost" title="Editar"
+                          onClick={() => { setEditando(pb); setShowForm(true); }}>
+                          <Icon name="pencil" size={14} />
+                        </button>
+                        <button className="btn icon sm ghost" title="Excluir"
+                          onClick={() => excluir(pb)}>
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showForm && (
+        <FormProdutoBase pb={editando}
+          onClose={() => setShowForm(false)}
+          onSave={() => { setShowForm(false); carregar(); }} />
+      )}
+    </div>
+  );
+}
+
+function FormProdutoBase({ pb, onClose, onSave }: any) {
+  const [form, setForm] = useState({
+    nome: pb?.nome || '',
+    unidadeMedida: pb?.unidadeMedida || 'un',
+    estoqueMinimo: pb?.estoqueMinimo ?? 0,
+  });
+  const [erro, setErro] = useState('');
+  const [salvando, setSalvando] = useState(false);
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setErro(''); setSalvando(true);
+    try {
+      const payload = {
+        nome: form.nome.trim(),
+        unidadeMedida: form.unidadeMedida.trim() || 'un',
+        estoqueMinimo: Number(form.estoqueMinimo) || 0,
+      };
+      if (pb) await api.patch(`/produtos-base/${pb.id}`, payload);
+      else await api.post('/produtos-base', payload);
+      onSave();
+    } catch (e: any) {
+      setErro(e.response?.data?.message || 'Erro ao salvar');
+    } finally { setSalvando(false); }
+  }
+
+  return (
+    <div className="modal-overlay">
+      <form className="modal" onSubmit={salvar} style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <span className="modal-title">{pb ? 'Editar produto base' : 'Novo produto base'}</span>
+          <button type="button" className="btn icon sm ghost" onClick={onClose}><Icon name="x" size={16} /></button>
+        </div>
+
+        <label className="label">Nome *</label>
+        <input className="input" required value={form.nome}
+          onChange={(e) => setForm({ ...form, nome: e.target.value })}
+          placeholder='Ex: "Arroz 5kg", "Sabão em pó 800g"' style={{ marginBottom: 12 }} />
+
+        <label className="label">Unidade de medida</label>
+        <input className="input" value={form.unidadeMedida}
+          onChange={(e) => setForm({ ...form, unidadeMedida: e.target.value })}
+          placeholder="un, kg, L, pct..." style={{ marginBottom: 12 }} />
+
+        <label className="label">Estoque mínimo</label>
+        <input className="input" type="number" min="0" step="1" value={form.estoqueMinimo}
+          onChange={(e) => setForm({ ...form, estoqueMinimo: e.target.value })} style={{ marginBottom: 14 }} />
+
+        {erro && <div style={{ padding: 8, borderRadius: 6, background: 'var(--r-50)', color: 'var(--r-600)', fontSize: 12, marginBottom: 12 }}>{erro}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="btn primary" disabled={salvando}>
+            {salvando ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

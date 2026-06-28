@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import Icon from '../components/Icon';
 import Scanner from '../components/Scanner';
-import { FormItem } from './Itens';
+import InputData from '../components/InputData';
+import { useAuth } from '../context/AuthContext';
 import { fmtData } from '../utils/format';
+import { FormItem } from './Itens';
 
 interface LinhaLote {
   itemId: string;
@@ -15,11 +17,13 @@ interface LinhaLote {
 }
 
 export default function Entradas() {
+  const { podeFazer } = useAuth();
   const [doadores, setDoadores] = useState<any[]>([]);
   const [doadorId, setDoadorId] = useState('');
   const [observacao, setObservacao] = useState('');
   const [linhas, setLinhas] = useState<LinhaLote[]>([]);
   const [movs, setMovs] = useState<any[]>([]);
+  const [editandoMov, setEditandoMov] = useState<any | null>(null);
   const [busca, setBusca] = useState('');
   const [sugestoes, setSugestoes] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
@@ -216,8 +220,8 @@ export default function Entradas() {
                     <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 2 }}>
                       Validade (opcional)
                     </div>
-                    <input className="input" type="date" value={l.dataValidade}
-                      onChange={(e) => atualizar(idx, { dataValidade: e.target.value })} />
+                    <InputData value={l.dataValidade}
+                      onChange={(iso) => atualizar(idx, { dataValidade: iso })} />
                   </div>
                 </div>
               </div>
@@ -283,13 +287,19 @@ export default function Entradas() {
             </div>
           ) : movs.map((m) => (
             <div key={m.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+                <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>
                   {m.itens.map((mi: any) => mi.item.nome).join(', ')}
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600, flexShrink: 0 }}>
                   +{m.itens.reduce((s: number, mi: any) => s + Number(mi.quantidade), 0)}
                 </span>
+                {podeFazer('mov.entrada') && (
+                  <button className="btn icon sm ghost" title="Editar entrada"
+                    onClick={() => setEditandoMov(m)} style={{ flexShrink: 0 }}>
+                    <Icon name="pencil" size={13} />
+                  </button>
+                )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
                 {m.doador?.nome || 'Doação avulsa'} · {fmtData(m.dataMovimentacao)} · {m.usuario.nome}
@@ -298,6 +308,12 @@ export default function Entradas() {
           ))}
         </div>
       </div>
+
+      {editandoMov && (
+        <EditarEntrada movimentacao={editandoMov} doadores={doadores}
+          onClose={() => setEditandoMov(null)}
+          onSave={() => { setEditandoMov(null); carregarMovs(); }} />
+      )}
 
       {showScanner && (
         <Scanner
@@ -318,6 +334,139 @@ export default function Entradas() {
           onSave={aoConcluirCadastro}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Modal de edicao de uma entrada (movimentacao tipo ENTRADA).
+ *
+ * Permite ajustar: doador da movimentacao, observacao, e — para cada lote —
+ * quantidade, validade, localizacao, observacao. Backend bloqueia alteracao
+ * de quantidade quando o lote ja foi consumido em outra movimentacao.
+ */
+function EditarEntrada({ movimentacao, doadores, onClose, onSave }: any) {
+  const [doadorId, setDoadorId] = useState(movimentacao.doadorId || '');
+  const [observacao, setObservacao] = useState(movimentacao.observacao || '');
+  const [lotes, setLotes] = useState(() => movimentacao.itens.map((mi: any) => ({
+    loteId: mi.loteId,
+    codigoLote: mi.lote?.codigoLote,
+    itemNome: mi.item?.nome,
+    unidade: mi.item?.unidadeMedida || 'un',
+    quantidade: Number(mi.quantidade),
+    quantidadeOriginal: Number(mi.quantidade),
+    saldoAtualLote: Number(mi.lote?.quantidadeAtual || 0),
+    dataValidade: mi.lote?.dataValidade ? String(mi.lote.dataValidade).slice(0, 10) : '',
+    localizacao: mi.lote?.localizacao || '',
+    observacao: mi.lote?.observacao || '',
+  })));
+  const [erro, setErro] = useState('');
+  const [salvando, setSalvando] = useState(false);
+
+  function atualizarLote(idx: number, patch: any) {
+    setLotes((arr: any[]) => arr.map((l: any, i: number) => i === idx ? { ...l, ...patch } : l));
+  }
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setErro(''); setSalvando(true);
+    try {
+      const payload = {
+        doadorId: doadorId || null,
+        observacao,
+        lotes: lotes.map((l: any) => ({
+          loteId: l.loteId,
+          quantidade: Number(l.quantidade),
+          dataValidade: l.dataValidade || null,
+          localizacao: l.localizacao || null,
+          observacao: l.observacao || null,
+        })),
+      };
+      await api.patch(`/movimentacoes/${movimentacao.id}/entrada`, payload);
+      onSave();
+    } catch (e: any) {
+      setErro(e.response?.data?.message || 'Erro ao salvar edição');
+    } finally { setSalvando(false); }
+  }
+
+  return (
+    <div className="modal-overlay">
+      <form className="modal" onSubmit={salvar} style={{ maxWidth: 560 }}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="pencil" size={18} color="var(--primary)" />
+            <span className="modal-title">Editar entrada</span>
+          </div>
+          <button type="button" className="btn icon sm ghost" onClick={onClose}><Icon name="x" size={16} /></button>
+        </div>
+
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12, lineHeight: 1.5 }}>
+          Você pode ajustar quantidade, validade e demais dados de cada lote.
+          A quantidade só pode mudar se o lote ainda não foi consumido em outra movimentação.
+          Toda alteração é registrada na auditoria.
+        </div>
+
+        <label className="label">Doador</label>
+        <select className="select" value={doadorId}
+          onChange={(e) => setDoadorId(e.target.value)} style={{ marginBottom: 12 }}>
+          <option value="">— Doação avulsa —</option>
+          {doadores.map((d: any) => <option key={d.id} value={d.id}>{d.nome}</option>)}
+        </select>
+
+        <label className="label">Observação geral</label>
+        <textarea className="input" rows={2} value={observacao}
+          onChange={(e) => setObservacao(e.target.value)} style={{ marginBottom: 14, resize: 'vertical' }} />
+
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Lotes desta entrada</div>
+        {lotes.map((l: any, idx: number) => {
+          const podeMudarQtd = l.saldoAtualLote === l.quantidadeOriginal;
+          return (
+            <div key={l.loteId} style={{
+              padding: 10, marginBottom: 10, borderRadius: 6,
+              background: 'var(--surface-2)', border: '1px solid var(--border)',
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{l.itemNome}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 8, fontFamily: 'monospace' }}>{l.codigoLote}</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div>
+                  <label className="label" style={{ fontSize: 10 }}>Quantidade ({l.unidade})</label>
+                  <input className="input" type="number" min="1" value={l.quantidade}
+                    disabled={!podeMudarQtd}
+                    onChange={(e) => atualizarLote(idx, { quantidade: parseFloat(e.target.value) || 0 })} />
+                  {!podeMudarQtd && (
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                      Lote já consumido — qtd bloqueada
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="label" style={{ fontSize: 10 }}>Validade</label>
+                  <InputData value={l.dataValidade}
+                    onChange={(iso) => atualizarLote(idx, { dataValidade: iso })} />
+                </div>
+              </div>
+
+              <label className="label" style={{ fontSize: 10, marginTop: 8 }}>Localização (opcional)</label>
+              <input className="input" value={l.localizacao}
+                onChange={(e) => atualizarLote(idx, { localizacao: e.target.value })}
+                placeholder="Ex: Prateleira A3" />
+            </div>
+          );
+        })}
+
+        {erro && (
+          <div style={{ padding: 10, borderRadius: 6, background: 'var(--r-50)',
+            color: 'var(--r-600)', fontSize: 12, marginBottom: 12, lineHeight: 1.4 }}>{erro}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="btn primary" disabled={salvando}>
+            <Icon name="check" size={14} /> {salvando ? 'Salvando…' : 'Salvar alterações'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
