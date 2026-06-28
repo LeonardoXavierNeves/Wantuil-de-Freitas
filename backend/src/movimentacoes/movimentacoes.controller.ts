@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
 import { PerfilGuard } from '../common/perfil.guard';
 import { Perfis } from '../common/perfil.decorator';
@@ -37,5 +37,10 @@ export class MovimentacoesController {
   @Post(':id/estorno') @Perfis('MASTER', 'ADMIN')
   estorno(@Req() req: any, @Param('id') id: string) {
     return this.service.estornar(req.user.id, id);
+  }
+
+  @Patch(':id/entrada') @Perfis('MASTER', 'ADMIN', 'ALMOXARIFE')
+  editarEntrada(@Req() req: any, @Param('id') id: string, @Body() dto: any) {
+    return this.service.editarEntrada(req.user.id, id, dto);
   }
 }

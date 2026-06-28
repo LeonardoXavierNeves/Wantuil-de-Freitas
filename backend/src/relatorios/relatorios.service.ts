@@ -17,13 +17,14 @@ export class RelatoriosService {
   async posicaoEstoque(setorId?: string) {
     const itens = await this.prisma.item.findMany({
       where: { ativo: true, ...(setorId ? { setorId } : {}) },
-      include: { categoria: true, setor: true },
+      include: { categoria: true, setor: true, produtoBase: true },
       orderBy: [{ setor: { nome: 'asc' } }, { nome: 'asc' }],
     });
     return itens.map((i) => ({
       codigo: i.codigoInterno,
       ean: i.codigoEan,
       nome: i.nome,
+      produtoBase: i.produtoBase?.nome || null,
       categoria: i.categoria.nome,
       setor: i.setor?.nome || '—',
       saldo: Number(i.saldoAtual),
@@ -33,6 +34,59 @@ export class RelatoriosService {
       validade: i.dataValidade,
       statusValidade: calcularStatusValidade(i.dataValidade),
     }));
+  }
+
+  /**
+   * Posicao de estoque agrupada por PRODUTO BASE (nao por marca).
+   * Para itens sem produtoBase, eles aparecem isolados (cada um conta como
+   * seu proprio "produto"). Util para o relatorio onde se quer ver
+   * "Arroz 5kg = 12 un" em vez de "Arroz Tio Joao = 5 un, Arroz Camil = 7 un".
+   */
+  async posicaoEstoquePorProduto(setorId?: string) {
+    const itens = await this.prisma.item.findMany({
+      where: { ativo: true, ...(setorId ? { setorId } : {}) },
+      include: { produtoBase: true, categoria: true, setor: true },
+    });
+
+    const grupos = new Map<string, any>();
+
+    for (const i of itens) {
+      const chave = i.produtoBaseId || `__item_${i.id}`;
+      const grupo = grupos.get(chave);
+      if (!grupo) {
+        grupos.set(chave, {
+          chave,
+          // Se tem produtoBase usa o nome dele; senao usa o nome do proprio item
+          produto: i.produtoBase?.nome || i.nome,
+          unidade: i.produtoBase?.unidadeMedida || i.unidadeMedida,
+          minimo: i.produtoBase ? Number(i.produtoBase.estoqueMinimo) : Number(i.estoqueMinimo),
+          temProdutoBase: !!i.produtoBase,
+          categoria: i.categoria.nome,
+          saldo: Number(i.saldoAtual),
+          marcas: i.produtoBase
+            ? [{ nome: i.nome, saldo: Number(i.saldoAtual), setor: i.setor?.nome || '—' }]
+            : [],
+          setores: new Set<string>([i.setor?.nome || '—']),
+        });
+      } else {
+        grupo.saldo += Number(i.saldoAtual);
+        grupo.marcas.push({ nome: i.nome, saldo: Number(i.saldoAtual), setor: i.setor?.nome || '—' });
+        grupo.setores.add(i.setor?.nome || '—');
+      }
+    }
+
+    return Array.from(grupos.values()).map((g) => ({
+      produto: g.produto,
+      categoria: g.categoria,
+      setores: Array.from(g.setores).join(', '),
+      saldo: g.saldo,
+      unidade: g.unidade,
+      minimo: g.minimo,
+      abaixoMinimo: g.minimo > 0 && g.saldo <= g.minimo,
+      qtdMarcas: g.marcas.length,
+      marcas: g.marcas,
+      temProdutoBase: g.temProdutoBase,
+    })).sort((a, b) => a.produto.localeCompare(b.produto));
   }
 
   async movimentacoes(dataInicio: string, dataFim: string, setorId?: string, tipo?: string) {

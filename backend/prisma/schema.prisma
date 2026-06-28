@@ -109,6 +109,27 @@ model Setor {
   @@map("setores")
 }
 
+/// Produto base agrega VARIAS marcas/variacoes do mesmo produto.
+/// Ex: "Arroz 5kg" e o produto base de "Arroz Tio Joao 5kg" e "Arroz Camil 5kg".
+/// O estoque minimo passa a ser definido no produto base (nao mais no item)
+/// e os alertas comparam a SOMA do saldo das marcas com o minimo do produto base.
+///
+/// Campo no Item permanece opcional para preservar compatibilidade com
+/// itens cadastrados antes da reforma.
+model ProdutoBase {
+  id              String   @id @default(uuid())
+  nome            String   @unique
+  unidadeMedida   String   @default("un") @map("unidade_medida")
+  estoqueMinimo   Decimal  @default(0) @map("estoque_minimo") @db.Decimal(10, 2)
+  ativo           Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  itens Item[]
+
+  @@map("produtos_base")
+}
+
 model Item {
   id            String    @id @default(uuid())
   codigoInterno String    @unique @map("codigo_interno")
@@ -128,6 +149,11 @@ model Item {
   categoriaId String    @map("categoria_id")
   categoria   Categoria @relation(fields: [categoriaId], references: [id])
   setorId     String?   @map("setor_id")
+
+  // Vinculo opcional com produto base. Se preenchido, alertas e relatorios
+  // agregam por este produto. Se vazio, item se comporta isolado.
+  produtoBaseId String?      @map("produto_base_id")
+  produtoBase   ProdutoBase? @relation(fields: [produtoBaseId], references: [id])
   setor       Setor?    @relation(fields: [setorId], references: [id])
 
   lotes             Lote[]

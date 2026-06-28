@@ -13,6 +13,7 @@ export class RelatoriosController {
 
   // ═══════════ JSON (dados pra tela) ═══════════
   @Get('estoque') estoque(@Query('setorId') setorId?: string) { return this.service.posicaoEstoque(setorId); }
+  @Get('estoque-por-produto') estoquePorProduto(@Query('setorId') setorId?: string) { return this.service.posicaoEstoquePorProduto(setorId); }
 
   @Get('movimentacoes')
   movs(@Query('dataInicio') di: string, @Query('dataFim') df: string,

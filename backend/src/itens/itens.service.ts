@@ -3,12 +3,13 @@ import {
   Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseDataLocal } from '../common/data-fuso';
 
 export function calcularStatusValidade(dataValidade: Date | null): string {
   if (!dataValidade) return 'VIGENTE';
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-  const val = new Date(dataValidade);
+  const val = parseDataLocal(dataValidade) || new Date();
   val.setHours(0, 0, 0, 0);
 
   const seisMesesDepois = new Date(val);
@@ -131,10 +132,11 @@ export class ItensService {
               descricao: data.descricao?.trim() || null,
               unidadeMedida: (data.unidadeMedida || '').trim() || 'un',
               estoqueMinimo: estoqueValido,
-              dataValidade: data.dataValidade ? new Date(data.dataValidade) : null,
+              dataValidade: data.dataValidade ? parseDataLocal(data.dataValidade) : null,
               localizacao: data.localizacao?.trim() || null,
               categoriaId: data.categoriaId,
               setorId: setorIdValido,
+              produtoBaseId: data.produtoBaseId || null,
             },
             include: { categoria: true, setor: true },
           });
@@ -184,11 +186,12 @@ export class ItensService {
       if (data.categoriaId !== undefined) updateData.categoriaId = data.categoriaId;
       if (data.setorId !== undefined) updateData.setorId = data.setorId || null;
       if (data.dataValidade !== undefined) {
-        updateData.dataValidade = data.dataValidade ? new Date(data.dataValidade) : null;
+        updateData.dataValidade = data.dataValidade ? parseDataLocal(data.dataValidade) : null;
       }
       if (data.codigoEan !== undefined) {
         updateData.codigoEan = (data.codigoEan || '').replace(/\D/g, '') || null;
       }
+      if (data.produtoBaseId !== undefined) updateData.produtoBaseId = data.produtoBaseId || null;
 
       return await this.prisma.item.update({
         where: { id }, data: updateData,
@@ -231,9 +234,7 @@ export class ItensService {
    * sua propria validade); estoque minimo continua sendo por ITEM (agregado).
    */
   async alertas() {
-    // 1. Validade: olha cada LOTE ativo cujo ITEM tambem esteja ativo.
-    //    Item desativado sai do dashboard mesmo que ainda tenha lote com saldo,
-    //    pois ele esta fora de circulacao por decisao do admin.
+    // 1. Validade: lotes ativos cujo item esteja ativo
     const lotes = await this.prisma.lote.findMany({
       where: {
         ativo: true,
@@ -247,14 +248,58 @@ export class ItensService {
       statusValidade: calcularStatusValidade(l.dataValidade),
     }));
 
-    // 2. Estoque minimo: agrega por ITEM. Ja filtra ativo: true.
+    // 2. Estoque minimo - duas regras:
+    //    a) Itens SEM produto base: comparam estoqueMinimo do proprio item
+    //    b) Itens COM produto base: agregam saldos de todas as marcas e
+    //       comparam com o estoqueMinimo do produto base. So gera 1 alerta
+    //       por produto base (nao por marca).
     const itens = await this.prisma.item.findMany({
-      where: { ativo: true, estoqueMinimo: { gt: 0 } },
-      include: { setor: true },
+      where: { ativo: true },
+      include: { setor: true, produtoBase: true },
     });
-    const abaixoMinimo = itens
-      .filter((i) => Number(i.saldoAtual) <= Number(i.estoqueMinimo))
-      .map((i) => ({ ...i, abaixoMinimo: true }));
+
+    // Soma saldos agrupados por produtoBaseId (so contabiliza marcas ativas)
+    const saldoPorProdutoBase = new Map<string, number>();
+    for (const i of itens) {
+      if (i.produtoBaseId) {
+        const acc = saldoPorProdutoBase.get(i.produtoBaseId) || 0;
+        saldoPorProdutoBase.set(i.produtoBaseId, acc + Number(i.saldoAtual));
+      }
+    }
+
+    const abaixoMinimo: any[] = [];
+
+    // a) Items sem produto base
+    for (const i of itens.filter((x) => !x.produtoBaseId && Number(x.estoqueMinimo) > 0)) {
+      if (Number(i.saldoAtual) <= Number(i.estoqueMinimo)) {
+        abaixoMinimo.push({ ...i, abaixoMinimo: true, agrupado: false });
+      }
+    }
+
+    // b) Produtos base (1 alerta por produto base, nao por marca)
+    const produtosBaseVistos = new Set<string>();
+    for (const i of itens.filter((x) => x.produtoBaseId)) {
+      const pb = i.produtoBase;
+      if (!pb || produtosBaseVistos.has(pb.id)) continue;
+      produtosBaseVistos.add(pb.id);
+      if (Number(pb.estoqueMinimo) <= 0) continue;
+      const saldoTotal = saldoPorProdutoBase.get(pb.id) || 0;
+      if (saldoTotal <= Number(pb.estoqueMinimo)) {
+        // Estrutura compativel com Item para o frontend
+        abaixoMinimo.push({
+          id: pb.id,
+          nome: pb.nome,
+          codigoInterno: '—',
+          unidadeMedida: pb.unidadeMedida,
+          saldoAtual: saldoTotal,
+          estoqueMinimo: pb.estoqueMinimo,
+          setor: null,
+          abaixoMinimo: true,
+          agrupado: true,
+          marcas: itens.filter((x) => x.produtoBaseId === pb.id).map((x) => ({ nome: x.nome, saldo: x.saldoAtual })),
+        });
+      }
+    }
 
     return {
       descarte: lotesComStatus.filter((l) => l.statusValidade === 'DESCARTE'),

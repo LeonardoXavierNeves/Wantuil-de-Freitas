@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseDataLocal } from '../common/data-fuso';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { LotesService } from '../lotes/lotes.service';
 
@@ -127,7 +128,7 @@ export class MovimentacoesService {
           itemId: l.itemId,
           loteId: lote.id,
           quantidade: Number(l.quantidade),
-          dataValidade: l.dataValidade ? new Date(l.dataValidade) : null,
+          dataValidade: l.dataValidade ? parseDataLocal(l.dataValidade) : null,
           saldoAnterior: saldoAtualItem - Number(l.quantidade),
           saldoPosterior: saldoAtualItem,
         },
@@ -380,6 +381,141 @@ export class MovimentacoesService {
   }
 
   // ═══════════════ ESTORNO ═══════════════
+  /**
+   * Edita uma movimentacao de ENTRADA existente.
+   *
+   * Restricoes:
+   * - So entradas (saida nao pode ser editada — usa estorno)
+   * - Para cada lote, so permite reduzir/aumentar quantidade se ainda nao
+   *   houve saida nem reserva do lote. Se ja houve, lanca excecao.
+   * - Item do lote nao pode ser trocado (erro de item = estorna e re-cadastra)
+   * - Dados editaveis por lote: quantidade, dataValidade, localizacao, observacao
+   * - Dados editaveis na movimentacao: doadorId, observacao
+   *
+   * Sempre gera um log de auditoria descrevendo o que mudou.
+   */
+  async editarEntrada(usuarioId: string, idMovimentacao: string, dto: {
+    doadorId?: string | null;
+    observacao?: string;
+    lotes?: {
+      loteId: string;
+      quantidade?: number;
+      dataValidade?: string | null;
+      localizacao?: string | null;
+      observacao?: string | null;
+    }[];
+  }) {
+    const mov = await this.prisma.movimentacao.findUnique({
+      where: { id: idMovimentacao },
+      include: { itens: { include: { lote: true } } },
+    });
+    if (!mov) throw new NotFoundException('Movimentação não encontrada');
+    if (mov.tipo !== 'ENTRADA') throw new BadRequestException('Apenas entradas podem ser editadas. Para outros tipos use estorno.');
+
+    // Verifica se ja foi estornada
+    const estornada = await this.prisma.movimentacao.findFirst({
+      where: { estornoDeId: idMovimentacao },
+    });
+    if (estornada) throw new BadRequestException('Esta entrada ja foi estornada e nao pode mais ser editada');
+
+    const mudancas: string[] = [];
+
+    return await this.prisma.$transaction(async (tx) => {
+      // Atualiza cabecalho da movimentacao
+      const updCab: any = {};
+      if (dto.doadorId !== undefined && dto.doadorId !== mov.doadorId) {
+        updCab.doadorId = dto.doadorId || null;
+        mudancas.push(`doador alterado`);
+      }
+      if (dto.observacao !== undefined && dto.observacao !== mov.observacao) {
+        updCab.observacao = dto.observacao;
+        mudancas.push(`observacao alterada`);
+      }
+      if (Object.keys(updCab).length > 0) {
+        await tx.movimentacao.update({ where: { id: idMovimentacao }, data: updCab });
+      }
+
+      // Atualiza cada lote
+      for (const lDto of dto.lotes || []) {
+        const movItem = mov.itens.find((mi) => mi.loteId === lDto.loteId);
+        if (!movItem) throw new BadRequestException(`Lote ${lDto.loteId} nao pertence a esta movimentacao`);
+        const lote = movItem.lote;
+        if (!lote) continue;
+
+        const updLote: any = {};
+        const updItemMov: any = {};
+
+        // Edicao de quantidade: so permite se o saldo atual do lote == quantidade
+        // original DA MOVIMENTACAO (ou seja, nao houve saida desse lote).
+        if (lDto.quantidade !== undefined && Number(lDto.quantidade) !== Number(movItem.quantidade)) {
+          if (Number(lote.quantidadeAtual) !== Number(movItem.quantidade)) {
+            throw new BadRequestException(
+              `Lote ${lote.codigoLote} ja foi consumido em outra movimentacao. ` +
+              `Para corrigir a quantidade, faca um estorno e registre uma nova entrada.`,
+            );
+          }
+          const novaQtd = Number(lDto.quantidade);
+          if (novaQtd <= 0) throw new BadRequestException('Quantidade deve ser maior que zero');
+          const delta = novaQtd - Number(movItem.quantidade);
+          updLote.quantidade = novaQtd;
+          updLote.quantidadeAtual = novaQtd;
+          updItemMov.quantidade = novaQtd;
+          // Atualiza saldo do item
+          await tx.item.update({
+            where: { id: movItem.itemId },
+            data: { saldoAtual: { increment: delta } },
+          });
+          mudancas.push(`qtd lote ${lote.codigoLote}: ${movItem.quantidade} -> ${novaQtd}`);
+        }
+
+        // Edicao de validade
+        if (lDto.dataValidade !== undefined) {
+          const nova = lDto.dataValidade ? parseDataLocal(lDto.dataValidade) : null;
+          const original = lote.dataValidade;
+          if (String(nova) !== String(original)) {
+            updLote.dataValidade = nova;
+            updItemMov.dataValidade = nova;
+            mudancas.push(`validade lote ${lote.codigoLote} alterada`);
+          }
+        }
+
+        // Edicao de localizacao / observacao
+        if (lDto.localizacao !== undefined && lDto.localizacao !== lote.localizacao) {
+          updLote.localizacao = lDto.localizacao;
+          mudancas.push(`localizacao lote ${lote.codigoLote} alterada`);
+        }
+        if (lDto.observacao !== undefined && lDto.observacao !== lote.observacao) {
+          updLote.observacao = lDto.observacao;
+        }
+
+        if (Object.keys(updLote).length > 0) {
+          await tx.lote.update({ where: { id: lote.id }, data: updLote });
+        }
+        if (Object.keys(updItemMov).length > 0) {
+          await tx.movimentacaoItem.update({ where: { id: movItem.id }, data: updItemMov });
+        }
+      }
+
+      // Log de auditoria
+      if (mudancas.length > 0) {
+        await tx.logAuditoria.create({
+          data: {
+            usuarioId,
+            acao: 'EDITAR_ENTRADA',
+            entidade: 'Movimentacao',
+            entidadeId: idMovimentacao,
+            detalhes: mudancas.join(' | '),
+          },
+        });
+      }
+
+      return tx.movimentacao.findUnique({
+        where: { id: idMovimentacao },
+        include: { itens: { include: { item: true, lote: true } }, doador: true },
+      });
+    });
+  }
+
   async estornar(usuarioId: string, idMovimentacao: string) {
     const mov = await this.prisma.movimentacao.findUnique({
       where: { id: idMovimentacao },

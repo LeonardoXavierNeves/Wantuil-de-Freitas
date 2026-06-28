@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseDataLocal } from '../common/data-fuso';
 
 /**
  * Calcula o status de validade de um lote baseado na data atual.
@@ -8,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export function calcularStatusLote(dataValidade: Date | null | undefined): string {
   if (!dataValidade) return 'VIGENTE';
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  const val = new Date(dataValidade); val.setHours(0, 0, 0, 0);
+  const val = parseDataLocal(dataValidade) || new Date(); val.setHours(0, 0, 0, 0);
 
   const seisMesesDepois = new Date(val);
   seisMesesDepois.setMonth(seisMesesDepois.getMonth() + 6);
@@ -192,7 +193,7 @@ export class LotesService {
         itemId: data.itemId,
         quantidadeInicial: qtd,
         quantidadeAtual: qtd,
-        dataValidade: data.dataValidade ? new Date(data.dataValidade) : null,
+        dataValidade: data.dataValidade ? parseDataLocal(data.dataValidade) : null,
         doadorId: data.doadorId || null,
         setorId: data.setorId || null,
         localizacao: data.localizacao?.trim() || null,
@@ -219,7 +220,7 @@ export class LotesService {
       where: { id },
       data: {
         ...(data.dataValidade !== undefined && {
-          dataValidade: data.dataValidade ? new Date(data.dataValidade) : null,
+          dataValidade: data.dataValidade ? parseDataLocal(data.dataValidade) : null,
         }),
         ...(data.localizacao !== undefined && { localizacao: data.localizacao?.trim() || null }),
         ...(data.observacao !== undefined && { observacao: data.observacao?.trim() || null }),
@@ -227,6 +228,66 @@ export class LotesService {
       },
       include: { item: true, doador: true, setor: true },
     });
+  }
+
+  /**
+   * Exclui um lote especifico.
+   *
+   * Regras de seguranca:
+   * - So permite excluir se quantidadeAtual === 0 (lote ja esvaziado)
+   * - Bloqueia se houver reservas ativas em eventos
+   * - Bloqueia se ja teve saidas/descartes (preservar historico — desativa
+   *   em vez de excluir)
+   * - Se nao puder excluir mas estiver vazio, desativa
+   */
+  async excluir(id: string, usuarioId: string) {
+    const lote = await this.prisma.lote.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { movimentacoesItem: true, reservasEvento: true } },
+      },
+    });
+    if (!lote) throw new NotFoundException('Lote nao encontrado');
+
+    // Bloqueia se ainda tem saldo
+    if (Number(lote.quantidadeAtual) > 0) {
+      throw new BadRequestException(
+        `Lote ${lote.codigoLote} ainda tem saldo (${lote.quantidadeAtual} un). ` +
+        `Apenas lotes esvaziados podem ser excluidos.`,
+      );
+    }
+
+    // Bloqueia se tem reservas ativas em eventos
+    const reservasAtivas = await this.prisma.reservaEvento.count({
+      where: { loteId: id, evento: { status: { in: ['PLANEJADO', 'EM_ANDAMENTO'] } } },
+    });
+    if (reservasAtivas > 0) {
+      throw new BadRequestException(
+        `Lote ${lote.codigoLote} esta reservado em ${reservasAtivas} evento(s) ativo(s).`,
+      );
+    }
+
+    // Se tem historico de movimentacoes, desativa em vez de excluir
+    if (lote._count.movimentacoesItem > 0 || lote._count.reservasEvento > 0) {
+      await this.prisma.lote.update({ where: { id }, data: { ativo: false } });
+      await this.prisma.logAuditoria.create({
+        data: {
+          usuarioId, acao: 'DESATIVAR_LOTE', entidade: 'Lote', entidadeId: id,
+          detalhes: `Lote ${lote.codigoLote} possui historico; foi desativado em vez de excluido`,
+        },
+      });
+      return { mensagem: `Lote ${lote.codigoLote} desativado (preserva historico)` };
+    }
+
+    // Sem historico = pode excluir de verdade
+    await this.prisma.lote.delete({ where: { id } });
+    await this.prisma.logAuditoria.create({
+      data: {
+        usuarioId, acao: 'EXCLUIR_LOTE', entidade: 'Lote', entidadeId: id,
+        detalhes: `Lote ${lote.codigoLote} excluido (sem historico)`,
+      },
+    });
+    return { mensagem: `Lote ${lote.codigoLote} excluido` };
   }
 
   // ─── Helper interno: recalcular saldo do item ────────────────

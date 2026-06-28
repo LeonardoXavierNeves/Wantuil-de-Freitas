@@ -4,6 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ItensModule } from './itens/itens.module';
+import { ProdutosBaseModule } from './produtos-base/produtos-base.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { SetoresModule } from './setores/setores.module';
 import { DoadoresModule } from './doadores/doadores.module';
@@ -24,6 +25,7 @@ import { EventosModule } from './eventos/eventos.module';
     AuthModule,
     UsersModule,
     ItensModule,
+    ProdutosBaseModule,
     CategoriasModule,
     SetoresModule,
     DoadoresModule,

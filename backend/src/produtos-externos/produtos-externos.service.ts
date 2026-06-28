@@ -158,7 +158,7 @@ export class ProdutosExternosService {
       const data: any = await resp.json();
       if (!data?.sucesso || !data?.produto) return null;
       const p = data.produto;
-      return {
+      return this.validar({
         ean,
         nome: this.capitalizar(p.nome || ''),
         marca: p.marca || undefined,
@@ -166,7 +166,7 @@ export class ProdutosExternosService {
         categoriaSugerida: this.inferirCategoria(p.nome, p.categoria),
         imagemUrl: p.imagem_url || undefined,
         fonte: 'dotcompany',
-      };
+      });
     } catch (e: any) {
       this.logger.debug(`DotCompany falhou: ${e.message}`);
       return null;
@@ -185,14 +185,14 @@ export class ProdutosExternosService {
       // O retorno pode ser { Product: { ... } } ou { product: { ... } }
       const p = data?.Product || data?.product;
       if (!p?.name) return null;
-      return {
+      return this.validar({
         ean,
         nome: this.capitalizar(p.name),
         marca: p.manufacturer || undefined,
         categoria: p.category || undefined,
         categoriaSugerida: this.inferirCategoria(p.name, p.category),
         fonte: 'produto-xyz',
-      };
+      });
     } catch (e: any) {
       this.logger.debug(`Produto XYZ falhou: ${e.message}`);
       return null;
@@ -217,7 +217,7 @@ export class ProdutosExternosService {
       if (!resp || !resp.ok) return null;
       const data: any = await resp.json();
       if (!data?.description) return null;
-      return {
+      return this.validar({
         ean,
         nome: this.capitalizar(data.description),
         marca: data.brand?.name || undefined,
@@ -225,7 +225,7 @@ export class ProdutosExternosService {
         categoriaSugerida: this.inferirCategoria(data.description, data.gpc?.description),
         imagemUrl: data.thumbnail || undefined,
         fonte: 'cosmos-bluesoft',
-      };
+      });
     } catch (e: any) {
       this.logger.debug(`Cosmos falhou: ${e.message}`);
       return null;
@@ -253,7 +253,7 @@ export class ProdutosExternosService {
       const p = data.product;
       const nome = p.product_name_pt || p.product_name || p.generic_name;
       if (!nome) return null;
-      return {
+      return this.validar({
         ean,
         nome: this.capitalizar(nome),
         marca: p.brands || undefined,
@@ -261,7 +261,7 @@ export class ProdutosExternosService {
         categoriaSugerida: config.catSug,
         imagemUrl: p.image_url || undefined,
         fonte: config.fonte,
-      };
+      });
     } catch {
       return null;
     }
@@ -278,7 +278,7 @@ export class ProdutosExternosService {
       const data: any = await resp.json();
       const item = data?.items?.[0];
       if (!item?.title) return null;
-      return {
+      return this.validar({
         ean,
         nome: this.capitalizar(item.title),
         marca: item.brand || undefined,
@@ -286,7 +286,7 @@ export class ProdutosExternosService {
         categoriaSugerida: this.inferirCategoria(item.title, item.category),
         imagemUrl: item.images?.[0] || undefined,
         fonte: 'upcitemdb',
-      };
+      });
     } catch (e: any) {
       this.logger.debug(`UPCitemdb falhou: ${e.message}`);
       return null;
@@ -327,6 +327,34 @@ export class ProdutosExternosService {
     } catch (e: any) {
       this.logger.warn(`Falha ao cachear ${p.ean}: ${e.message}`);
     }
+  }
+
+  /**
+   * Valida um ProdutoEncontrado antes de aceitar como "encontrado".
+   * Garante que tem nome real, nao e um placeholder/lixo, e bloqueia
+   * respostas vazias ou genericas que algumas APIs retornam.
+   */
+  private validar(p: ProdutoEncontrado | null): ProdutoEncontrado | null {
+    if (!p) return null;
+    const nome = (p.nome || '').trim();
+    if (nome.length < 3) return null;
+
+    // Bloqueia respostas genericas/lixo
+    const nomeLower = nome.toLowerCase();
+    const placeholders = [
+      'produto', 'produto desconhecido', 'desconhecido', 'sem nome', 'sem descricao',
+      'n/d', 'n/a', 'nao informado', 'nao identificado', 'unknown', 'no name', 'untitled',
+      'null', 'undefined', '---', '...', 'teste', 'test',
+    ];
+    if (placeholders.includes(nomeLower)) return null;
+
+    // Bloqueia nome formado so por digitos ou caracteres especiais
+    if (/^[\d\s\-_./]+$/.test(nome)) return null;
+
+    // Sem letras = invalido
+    if (!/[a-zA-ZÀ-ÿ]/.test(nome)) return null;
+
+    return p;
   }
 
   private capitalizar(s: string): string {
